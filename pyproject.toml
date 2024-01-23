@@ -14,6 +14,8 @@ classifiers = [
   'Programming Language :: Python :: 3',
 ]
 dependencies = [
+  'polars',
+  'networkx',
 ]
 
 [project.optional-dependencies]
@@ -27,7 +29,8 @@ doc = [
   'autoclasstoc',
 ]
 [project.scripts]
-macromol_census = "macromol_census:main"
+#macromol_census = "macromol_census:main"
+
 [project.urls]
 'Documentation' = 'https://macromol-census.readthedocs.io/en/latest/'
 'Version Control' = 'https://github.com/kalekundert/macromol_census'

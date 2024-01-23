@@ -1,6 +1,8 @@
-#!/usr/bin/env python3
+"""
+Tools for creating machine-learning datasets from macromolecular structure 
+data.
+"""
 
 __version__ = '0.0.0'
 
-def main():
-    print("Hello world!")
+from .database_io import *

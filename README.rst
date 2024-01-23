@@ -25,3 +25,16 @@ Macromolecule Census
 .. image:: https://img.shields.io/github/last-commit/kalekundert/macromol_census?logo=github
    :alt: Last commit
    :target: https://github.com/kalekundert/macromol_census
+
+*Macromolecule Census* is a set of tools for creating machine-learning datasets 
+from macromolecular structure data, especially those made available by the 
+protein data bank (PDB).  The purpose of these tools is to account for the 
+following:
+
+- Filter for high-quality (e.g. high resolution, low R-factor), low-redundancy 
+  (i.e. sequence identity cutoffs) structures.
+
+- Make robust training/validation/test splits by accounting for domain-level 
+  structural similarities.
+
+- Store atomic coordinates in a compact, portable, standard format (SQLite).
