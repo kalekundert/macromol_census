@@ -4,7 +4,7 @@ import polars.testing
 
 def test_metadata():
     db = mmc.open_db(':memory:')
-    mmc.init_atoms(db)
+    mmc.init_db(db)
 
     # Plausible metadata values, with an assortment of different data types.
     meta_in = {
@@ -22,9 +22,9 @@ def test_metadata():
 
     assert meta_out == meta_in
 
-def test_atoms_structure():
+def test_structures():
     db = mmc.open_db(':memory:')
-    mmc.init_atoms(db)
+    mmc.init_db(db)
 
     assert mmc.load_pdb_ids(db) == []
 
@@ -55,11 +55,11 @@ def test_atoms_structure():
     pl.testing.assert_frame_equal(struct_out.atoms, atoms)
     assert struct_out.interpro_available == True
 
-def test_atoms_homology():
+def test_homology():
     EntryType = mmc.InterProEntryType
 
     db = mmc.open_db(':memory:')
-    mmc.init_atoms(db)
+    mmc.init_db(db)
 
     mmc.insert_structure(db, mmc.Structure('0aaa', pl.DataFrame(), True))
     mmc.insert_structure(db, mmc.Structure('0aab', pl.DataFrame(), True))

@@ -43,9 +43,6 @@ def open_db(path):
     sqlite3.register_adapter(pl.DataFrame, _adapt_dataframe)
     sqlite3.register_converter('DATA_FRAME', _convert_dataframe)
 
-    sqlite3.register_adapter(np.ndarray, _adapt_array)
-    sqlite3.register_converter('3D_VECTOR', _convert_array)
-
     sqlite3.register_adapter(InterProEntryType, _adapt_interpro_entry_type)
     sqlite3.register_converter('ENTRY_TYPE', _convert_interpro_entry_type)
 
@@ -58,14 +55,13 @@ def open_db(path):
 
     return db
 
-
-def init_atoms(db):
+def init_db(db):
     cur = db.cursor()
 
     cur.execute('''\
             CREATE TABLE IF NOT EXISTS metadata (
                 key UNIQUE,
-                value ANY
+                value
             )
     ''')
     cur.execute('''\
@@ -97,36 +93,6 @@ def init_atoms(db):
             )
     ''')
     db.commit()
-
-def init_splits(db):
-    cur = db.cursor()
-
-    cur.execute('''\
-            CREATE TABLE IF NOT EXISTS meta (
-                key UNIQUE,
-                value
-            )
-    ''')
-    cur.execute('''\
-            CREATE TABLE IF NOT EXISTS origins (
-                id INTEGER PRIMARY KEY,
-                pdb_id TEXT UNIQUE,
-                center_A 3D_VECTOR,
-                split TEXT,
-            )
-    ''')
-    cur.execute('''\
-            CREATE TABLE IF NOT EXISTS neighbors (
-                id INTEGER PRIMARY KEY,
-                offset_A 3D_VECTOR,
-            )
-    ''')
-    cur.execute('''\
-            CREATE TABLE IF NOT EXISTS origin_neighbors (
-                origin_id,
-                neighbor_id,
-            )
-    ''')
 
 
 def insert_metadata(db, meta):
@@ -232,16 +198,6 @@ def _convert_dataframe(bytes):
     in_ = io.BytesIO(bytes)
     df = pl.read_parquet(in_)
     return df
-
-def _adapt_array(array):
-    out = io.BytesIO()
-    np.save(out, array, allow_pickle=False)
-    return out.getvalue()
-
-def _convert_array(bytes):
-    in_ = io.BytesIO(bytes)
-    x = np.load(in_)
-    return x
 
 def _adapt_interpro_entry_type(entry_type):
     return entry_type.value
