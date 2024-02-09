@@ -1,0 +1,77 @@
+test_ingest_models:
+  -
+    tmp_files:
+      model.cif:
+        > ...
+
+    models:
+
+
+
+test_parse_quality:
+  -
+    tmp_files:
+      data.json:
+        > {
+        >   "pdbid": "9xyz",
+        >   "properties": {
+        >     "RESOLUTION": 2.9,
+        >     "REFPATM": 4.5,
+        >     "RFFIN": 0.23,
+        >     "RFIN": 0.19
+        >   }
+        > }
+    expected:
+      resolution_A: 2.9
+      reflections_per_atom: 4.5
+      r_free: 0.23
+      r_work: 0.19
+
+test_find_covering_assemblies:
+  -
+    id: one-to-one-1-1
+    assembly_subchain_pairs:
+      - 1 A
+    expected:
+      - 1
+  -
+    id: one-to-one-1-2
+    assembly_subchain_pairs:
+      - 1 A
+      - 1 B
+    expected:
+      - 1
+  -
+    id: one-to-one-2-2
+    assembly_subchain_pairs:
+      - 1 A
+      - 2 B
+    expected:
+      - 1 2
+  -
+    id: ambiguous-2-1
+    assembly_subchain_pairs:
+      - 1 A
+      - 2 A
+    expected:
+      - 1
+      - 2
+  -
+    id: min-cover-2-2
+    assembly_subchain_pairs:
+      - 1 A
+      - 1 B
+      - 2 B
+    expected:
+      - 1
+  -
+    id: min-cover-3-2
+    assembly_subchain_pairs:
+      - 1 A
+      - 2 B
+      - 3 A
+      - 3 B
+    expected:
+      - 3
+
+

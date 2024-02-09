@@ -29,7 +29,7 @@ doc = [
   'autoclasstoc',
 ]
 [project.scripts]
-#macromol_census = "macromol_census:main"
+mmc_ingest_models = "macromol_census.ingest_models:main"
 
 [project.urls]
 'Documentation' = 'https://macromol-census.readthedocs.io/en/latest/'
