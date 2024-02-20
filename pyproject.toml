@@ -14,7 +14,7 @@ classifiers = [
   'Programming Language :: Python :: 3',
 ]
 dependencies = [
-  'polars',
+  #'polars',
   'networkx',
 ]
 
@@ -29,7 +29,9 @@ doc = [
   'autoclasstoc',
 ]
 [project.scripts]
-mmc_ingest_models = "macromol_census.ingest_models:main"
+mmc_ingest_mmcif = "macromol_census.ingest_mmcif:main"
+mmc_extract_fasta = "macromol_census.extract_fasta:main"
+mmc_ingest_entity_clusters = "macromol_census.ingest_entity_clusters:main"
 
 [project.urls]
 'Documentation' = 'https://macromol-census.readthedocs.io/en/latest/'

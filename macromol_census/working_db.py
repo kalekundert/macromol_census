@@ -1,42 +1,80 @@
 import duckdb
 import polars as pl
 
-from .util import NotFound, _dataclass_row_factory, _scalar_row_factory
-from dataclasses import dataclass, asdict
-
-@dataclass(frozen=True)
-class QualityXtal:
-    resolution_A: float             # RESOLUTION
-    reflections_per_atom: float     # REFPATM  
-    r_free: int                     # RFFIN
-    r_work: int                     # RFIN
-
 def open_db(path):
     return duckdb.connect(path)
 
 def init_db(db):
 
     # Models:
+    try:
+        db.execute('''\
+            CREATE TYPE EXPTL_METHOD AS ENUM (
+                'ELECTRON CRYSTALLOGRAPHY',
+                'ELECTRON MICROSCOPY',
+                'EPR',
+                'FIBER DIFFRACTION',
+                'FLUORESCENCE TRANSFER',
+                'INFRARED SPECTROSCOPY',
+                'NEUTRON DIFFRACTION',
+                'POWDER DIFFRACTION',
+                'SOLID-STATE NMR',
+                'SOLUTION NMR',
+                'SOLUTION SCATTERING',
+                'THEORETICAL MODEL',
+                'X-RAY DIFFRACTION'
+            );
+        ''')
+    except duckdb.CatalogException:
+        pass
+
     db.execute('''\
             CREATE SEQUENCE IF NOT EXISTS model_id;
             CREATE TABLE IF NOT EXISTS model (
                 id INT DEFAULT nextval('model_id') PRIMARY KEY,
-                pdb_id STRING
-            );
-
-            CREATE TABLE IF NOT EXISTS model_quality_xtal (
-                model_id INT NOT NULL,
-                resolution_A REAL,
-                reflections_per_atom REAL,
-                r_free REAL,
-                r_work REAL,
-                FOREIGN KEY (model_id) REFERENCES model(id)
+                pdb_id STRING,
+                exptl_methods EXPTL_METHOD[],
+                deposit_date DATE,
+                num_atoms INT,
             );
 
             CREATE TABLE IF NOT EXISTS model_blacklist (
                 model_id INT NOT NULL,
                 FOREIGN KEY (model_id) REFERENCES model(id)
             );
+    ''')
+
+    # Quality
+    db.execute('''\
+            CREATE TABLE IF NOT EXISTS quality_xtal (
+                model_id INT NOT NULL,
+                resolution_A REAL,
+                num_reflections REAL,
+                r_free REAL,
+                r_work REAL,
+                FOREIGN KEY (model_id) REFERENCES model(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_nmr (
+                model_id INT NOT NULL,
+                pdb_conformer_id STRING,
+                num_dist_restraints INT,
+                FOREIGN KEY (model_id) REFERENCES model(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_em (
+                model_id INT NOT NULL,
+                resolution_A REAL,
+                q_score REAL,
+                FOREIGN KEY (model_id) REFERENCES model(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_clashscore (
+                model_id INT NOT NULL,
+                clashscore REAL,
+                FOREIGN KEY (model_id) REFERENCES model(id)
+            );
+
     ''')
 
     # Assemblies:
@@ -67,7 +105,7 @@ def init_db(db):
 
             CREATE TABLE IF NOT EXISTS chain_cluster (
                 chain_id INT NOT NULL,
-                cluster STRING,
+                cluster INT NOT NULL,
                 FOREIGN KEY(chain_id) REFERENCES chain(id)
             )
     ''')
@@ -97,7 +135,7 @@ def init_db(db):
 
             CREATE TABLE IF NOT EXISTS entity_cluster (
                 entity_id INT NOT NULL,
-                cluster STRING,
+                cluster INT NOT NULL,
                 FOREIGN KEY(entity_id) REFERENCES entity(id)
             );
     ''')
@@ -133,24 +171,30 @@ def init_db(db):
     db.commit()
 
 
-def insert_metadata(db, param, value):
-    db.execute('''\
-            INSERT INTO metadata (param, value)
-            VALUES (?, ?)''',
-            (param, value),
-    )
-    db.commit()
-
 def insert_model(
         db,
         pdb_id,
         *,
-        quality=None,
+        exptl_methods,
+        deposit_date,
+        num_atoms,
+        quality_xtal=None,
+        quality_nmr=None,
+        quality_em=None,
         assembly_chain_pairs,
         chain_entity_pairs,
         polymers=None,
         nonpolymers=None,
 ):
+    """
+    Insert the given model into the given database.
+
+    The main role of this function is to translate PDB id numbers to database 
+    primary key numbers.  The data frames provided to this function describe 
+    all the relationships between the assemblies, chains, and entities in the 
+    model in terms of the id numbers used in the PDB.  This function works out 
+    how to express all the same relationships using globally unique keys.
+    """
     # Switch to the convention where `id` refers to an SQL primary key and 
     # `pdb_id` refers to the ids used in the mmCIF file (and other 
     # PDB-associated resources).
@@ -167,14 +211,16 @@ def insert_model(
     db.execute('BEGIN TRANSACTION')
 
     try:
-        model_id = _insert_model(db, pdb_id)
-
-        if quality is not None:
-            _insert_model_quality(db, model_id, quality)
+        model_id = _insert_model(
+                db, pdb_id,
+                exptl_methods=exptl_methods,
+                deposit_date=deposit_date,
+                num_atoms=num_atoms,
+        )
 
         # Sorting the ids isn't really necessary, but it makes testing easier.  
         # I don't think the runtime cost will be noticeable, but I haven't 
-        # benchmarked it yet.
+        # benchmarked it.
 
         assembly_pdb_ids = (
                 assembly_chain_pairs
@@ -202,6 +248,15 @@ def insert_model(
                 _insert_entities(db, model_id, entity_pdb_ids)
                 .select(pl.col('*').name.prefix('entity_'))
         )
+
+        if quality_xtal is not None:
+            _insert_quality_xtal(db, model_id, quality_xtal)
+
+        if quality_nmr is not None:
+            _insert_quality_nmr(db, model_id, quality_nmr)
+
+        if quality_em is not None:
+            _insert_quality_em(db, model_id, quality_em)
 
         if polymers is not None:
             polymers = (
@@ -240,40 +295,56 @@ def insert_model(
     else:
         db.execute('COMMIT')
 
-def _insert_model(db, pdb_id):
+def _insert_model(db, pdb_id, *, exptl_methods, deposit_date, num_atoms):
     cur = db.execute('''\
-            INSERT INTO model (pdb_id)
-            VALUES (?)
+            INSERT INTO model (pdb_id, exptl_methods, deposit_date, num_atoms)
+            VALUES (?, ?, ?, ?)
             RETURNING id''',
-            (pdb_id,),
+            (pdb_id, exptl_methods, deposit_date, num_atoms),
     )
     model_id, = cur.fetchone()
     return model_id
 
-def _insert_model_quality(db, model_id, quality):
-    match quality:
-
-        case QualityXtal():
-            db.execute('''\
-                    INSERT INTO model_quality_xtal (
-                        model_id,
-                        resolution_A,
-                        reflections_per_atom,
-                        r_free,
-                        r_work
-                    )
-                    VALUES (
-                        $model_id,
-                        $resolution_A,
-                        $reflections_per_atom,
-                        $r_free,
-                        $r_work
-                    )''',
-                    dict(model_id=model_id) | asdict(quality),
+def _insert_quality_xtal(db, model_id, quality_df):
+    rows = [
+        (model_id, *row)
+        for row in quality_df.select(
+                'resolution_A',
+                'num_reflections',
+                'r_free',
+                'r_work',
+        ).iter_rows()
+    ]
+    db.executemany('''\
+            INSERT INTO quality_xtal (
+                model_id,
+                resolution_A,
+                num_reflections,
+                r_free,
+                r_work
             )
+            VALUES (?, ?, ?, ?, ?)
+    ''', rows)
 
-        case _:
-            raise TypeError(f"can't interpret {quality} as a model quality description")
+def _insert_quality_nmr(db, model_id, quality_df):
+    rows = [
+        (model_id, conf_id)
+        for conf_id in quality_df['conformer_id']
+    ]
+    db.executemany('''\
+            INSERT INTO quality_nmr (model_id, pdb_conformer_id)
+            VALUES (?, ?)
+    ''', rows)
+
+def _insert_quality_em(db, model_id, quality_df):
+    rows = [
+        (model_id, resolution_A)
+        for resolution_A in quality_df['resolution_A']
+    ]
+    db.executemany('''\
+            INSERT INTO quality_em (model_id, resolution_A)
+            VALUES (?, ?)
+    ''', rows)
 
 def _insert_assemblies(db, model_id, assembly_pdb_ids):
     return _insert_pdb_ids(db, 'assembly', model_id, assembly_pdb_ids)
@@ -320,22 +391,37 @@ def _insert_chain_entity_pairs(db, chain_entity_pairs):
             chain_entity_pairs.select('chain_id', 'entity_id').iter_rows(),
     )
 
+def insert_chain_clusters(db, clusters):
+    db.sql('INSERT INTO chain_cluster SELECT chain_id, cluster FROM clusters')
 
-def create_model_indices():
-    pass
+def insert_entity_clusters(db, clusters):
+    db.sql('INSERT INTO entity_cluster SELECT entity_id, cluster FROM clusters')
+
+
+def create_model_indices(db):
+    db.execute('CREATE UNIQUE INDEX model_pdb_id ON model (pdb_id)')
 
 
 def select_models(db):
     return db.execute(f'SELECT * FROM model').pl()
 
-def select_model_qualities_xtal(db):
-    return db.execute(f'SELECT * FROM model_quality_xtal').pl()
+def select_qualities_xtal(db):
+    return db.execute(f'SELECT * FROM quality_xtal').pl()
+
+def select_qualities_nmr(db):
+    return db.execute(f'SELECT * FROM quality_nmr').pl()
+
+def select_qualities_em(db):
+    return db.execute(f'SELECT * FROM quality_em').pl()
 
 def select_assemblies(db):
     return db.execute(f'SELECT * FROM assembly').pl()
 
 def select_chains(db):
     return db.execute(f'SELECT * FROM chain').pl()
+
+def select_chain_clusters(db):
+    return db.execute(f'SELECT * FROM chain_cluster').pl()
 
 def select_entities(db):
     return db.execute(f'SELECT * FROM entity').pl()
@@ -345,6 +431,9 @@ def select_entity_polymers(db):
 
 def select_entity_nonpolymers(db):
     return db.execute(f'SELECT * FROM entity_nonpolymer').pl()
+
+def select_entity_clusters(db):
+    return db.execute(f'SELECT * FROM entity_cluster').pl()
 
 def select_assembly_chain_pairs(db):
     return db.execute(f'SELECT * FROM assembly_chain').pl()
