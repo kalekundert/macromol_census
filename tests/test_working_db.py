@@ -1,5 +1,6 @@
 import macromol_census.working_db as mmc
 import polars as pl
+import pytest
 
 from polars.testing import assert_frame_equal
 from datetime import date
@@ -7,7 +8,8 @@ from functools import partial
 
 assert_frame_equal = partial(assert_frame_equal, check_dtype=False)
 
-def test_model():
+@pytest.fixture
+def db():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
@@ -43,6 +45,9 @@ def test_model():
             nonpolymers=nonpolymers,
     )
 
+    return db
+
+def test_model(db):
     assert mmc.select_models(db).to_dicts() == [
             dict(
                 id=1,
@@ -74,25 +79,39 @@ def test_model():
             dict(chain_id=2, entity_id=2),
     ]
 
+def test_model_blacklist(db):
+    blacklist = pl.DataFrame([
+        dict(pdb_id='9xyz'),
+    ])
+
+    mmc.insert_model_blacklist(db, blacklist)
+
+    assert mmc.select_model_blacklist(db).to_dicts() == [
+        dict(model_id=1),
+    ]
+
+def test_chain_clusters(db):
     chain_clusters = pl.DataFrame([
         dict(cluster=1, chain_id=1),
         dict(cluster=1, chain_id=2),
     ])
-    entity_clusters = pl.DataFrame([
-        dict(cluster=1, entity_id=1),
-        dict(cluster=1, entity_id=2),
-    ])
 
     mmc.insert_chain_clusters(db, chain_clusters)
-    mmc.insert_entity_clusters(db, entity_clusters)
 
     assert mmc.select_chain_clusters(db).to_dicts() == [
         dict(cluster=1, chain_id=1),
         dict(cluster=1, chain_id=2),
     ]
+
+def test_entity_clusters(db):
+    entity_clusters = pl.DataFrame([
+        dict(cluster=1, entity_id=1),
+        dict(cluster=1, entity_id=2),
+    ])
+
+    mmc.insert_entity_clusters(db, entity_clusters)
+
     assert mmc.select_entity_clusters(db).to_dicts() == [
         dict(cluster=1, entity_id=1),
         dict(cluster=1, entity_id=2),
     ]
-
-

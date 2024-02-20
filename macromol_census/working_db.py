@@ -391,6 +391,14 @@ def _insert_chain_entity_pairs(db, chain_entity_pairs):
             chain_entity_pairs.select('chain_id', 'entity_id').iter_rows(),
     )
 
+def insert_model_blacklist(db, blacklist):
+    db.sql('''\
+            INSERT INTO model_blacklist (model_id)
+            SELECT model.id
+            FROM blacklist
+            JOIN model USING (pdb_id)
+    ''')
+
 def insert_chain_clusters(db, clusters):
     db.sql('INSERT INTO chain_cluster SELECT chain_id, cluster FROM clusters')
 
@@ -404,6 +412,9 @@ def create_model_indices(db):
 
 def select_models(db):
     return db.execute(f'SELECT * FROM model').pl()
+
+def select_model_blacklist(db):
+    return db.execute(f'SELECT * FROM model_blacklist').pl()
 
 def select_qualities_xtal(db):
     return db.execute(f'SELECT * FROM quality_xtal').pl()
