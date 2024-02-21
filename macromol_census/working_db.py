@@ -1,5 +1,6 @@
 import duckdb
 import polars as pl
+from contextlib import contextmanager
 
 def open_db(path):
     return duckdb.connect(path)
@@ -170,6 +171,17 @@ def init_db(db):
 
     db.commit()
 
+@contextmanager
+def transaction(db):
+    db.execute('BEGIN TRANSACTION')
+    try:
+        yield
+    except:
+        db.execute('ROLLBACK')
+        raise
+    else:
+        db.execute('COMMIT')
+
 
 def insert_model(
         db,
@@ -194,6 +206,10 @@ def insert_model(
     all the relationships between the assemblies, chains, and entities in the 
     model in terms of the id numbers used in the PDB.  This function works out 
     how to express all the same relationships using globally unique keys.
+
+    This function should be used within a transaction, since the database could 
+    end up in a corrupt state if a model is only partially ingested.  However, 
+    responsibility for transaction handling is left to the caller.
     """
     # Switch to the convention where `id` refers to an SQL primary key and 
     # `pdb_id` refers to the ids used in the mmCIF file (and other 
@@ -208,92 +224,82 @@ def insert_model(
         'entity_id': 'entity_pdb_id',
     })
 
-    db.execute('BEGIN TRANSACTION')
+    model_id = _insert_model(
+            db, pdb_id,
+            exptl_methods=exptl_methods,
+            deposit_date=deposit_date,
+            num_atoms=num_atoms,
+    )
 
-    try:
-        model_id = _insert_model(
-                db, pdb_id,
-                exptl_methods=exptl_methods,
-                deposit_date=deposit_date,
-                num_atoms=num_atoms,
-        )
+    # Sorting the ids isn't really necessary, but it makes testing easier.  
+    # I don't think the runtime cost will be noticeable, but I haven't 
+    # benchmarked it.
 
-        # Sorting the ids isn't really necessary, but it makes testing easier.  
-        # I don't think the runtime cost will be noticeable, but I haven't 
-        # benchmarked it.
+    assembly_pdb_ids = (
+            assembly_chain_pairs
+            .select(pl.col('assembly_pdb_id').unique().sort())
+    )
+    assembly_ids = (
+            _insert_assemblies(db, model_id, assembly_pdb_ids)
+            .select(pl.col('*').name.prefix('assembly_'))
+    )
 
-        assembly_pdb_ids = (
-                assembly_chain_pairs
-                .select(pl.col('assembly_pdb_id').unique().sort())
-        )
-        assembly_ids = (
-                _insert_assemblies(db, model_id, assembly_pdb_ids)
-                .select(pl.col('*').name.prefix('assembly_'))
-        )
+    chain_pdb_ids = (
+            assembly_chain_pairs
+            .select(pl.col('chain_pdb_id').unique().sort())
+    )
+    chain_ids = (
+            _insert_chains(db, model_id, chain_pdb_ids)
+            .select(pl.col('*').name.prefix('chain_'))
+    )
 
-        chain_pdb_ids = (
-                assembly_chain_pairs
-                .select(pl.col('chain_pdb_id').unique().sort())
-        )
-        chain_ids = (
-                _insert_chains(db, model_id, chain_pdb_ids)
-                .select(pl.col('*').name.prefix('chain_'))
-        )
+    entity_pdb_ids = (
+            chain_entity_pairs
+            .select(pl.col('entity_pdb_id').unique().sort())
+    )
+    entity_ids = (
+            _insert_entities(db, model_id, entity_pdb_ids)
+            .select(pl.col('*').name.prefix('entity_'))
+    )
 
-        entity_pdb_ids = (
-                chain_entity_pairs
-                .select(pl.col('entity_pdb_id').unique().sort())
-        )
-        entity_ids = (
-                _insert_entities(db, model_id, entity_pdb_ids)
-                .select(pl.col('*').name.prefix('entity_'))
-        )
+    if quality_xtal is not None:
+        _insert_quality_xtal(db, model_id, quality_xtal)
 
-        if quality_xtal is not None:
-            _insert_quality_xtal(db, model_id, quality_xtal)
+    if quality_nmr is not None:
+        _insert_quality_nmr(db, model_id, quality_nmr)
 
-        if quality_nmr is not None:
-            _insert_quality_nmr(db, model_id, quality_nmr)
+    if quality_em is not None:
+        _insert_quality_em(db, model_id, quality_em)
 
-        if quality_em is not None:
-            _insert_quality_em(db, model_id, quality_em)
-
-        if polymers is not None:
-            polymers = (
-                    polymers
-                    .rename({'entity_id': 'entity_pdb_id'})
-                    .join(entity_ids, on='entity_pdb_id')
-            )
-            _insert_entity_polymers(db, polymers)
-
-        if nonpolymers is not None:
-            nonpolymers = (
-                    nonpolymers
-                    .rename({'entity_id': 'entity_pdb_id'})
-                    .join(entity_ids, on='entity_pdb_id')
-            )
-            _insert_entity_nonpolymers(db, nonpolymers)
-
-        assembly_chain_pairs = (
-                assembly_chain_pairs
-                .join(assembly_ids, on='assembly_pdb_id')
-                .join(chain_ids, on='chain_pdb_id')
-        )
-        chain_entity_pairs = (
-                chain_entity_pairs
-                .join(chain_ids, on='chain_pdb_id')
+    if polymers is not None:
+        polymers = (
+                polymers
+                .rename({'entity_id': 'entity_pdb_id'})
                 .join(entity_ids, on='entity_pdb_id')
         )
+        _insert_entity_polymers(db, polymers)
 
-        _insert_assembly_chain_pairs(db, assembly_chain_pairs)
-        _insert_chain_entity_pairs(db, chain_entity_pairs)
+    if nonpolymers is not None:
+        nonpolymers = (
+                nonpolymers
+                .rename({'entity_id': 'entity_pdb_id'})
+                .join(entity_ids, on='entity_pdb_id')
+        )
+        _insert_entity_nonpolymers(db, nonpolymers)
 
-    except:
-        db.execute('ROLLBACK')
-        raise
+    assembly_chain_pairs = (
+            assembly_chain_pairs
+            .join(assembly_ids, on='assembly_pdb_id')
+            .join(chain_ids, on='chain_pdb_id')
+    )
+    chain_entity_pairs = (
+            chain_entity_pairs
+            .join(chain_ids, on='chain_pdb_id')
+            .join(entity_ids, on='entity_pdb_id')
+    )
 
-    else:
-        db.execute('COMMIT')
+    _insert_assembly_chain_pairs(db, assembly_chain_pairs)
+    _insert_chain_entity_pairs(db, chain_entity_pairs)
 
 def _insert_model(db, pdb_id, *, exptl_methods, deposit_date, num_atoms):
     cur = db.execute('''\
@@ -399,6 +405,31 @@ def insert_model_blacklist(db, blacklist):
             JOIN model USING (pdb_id)
     ''')
 
+def update_quality_nmr(db, pdb_id, *, num_dist_restraints=None):
+    # It would be safer to insert a new row instead of updating a row that, in 
+    # principle, might not exist, or might not be unique.  But I've separately 
+    # measured that each NMR structure will have exactly one row in this table.
+    model_id = select_model_id(db, pdb_id)
+    db.execute('''\
+            UPDATE quality_nmr
+            SET num_dist_restraints = ?
+            WHERE model_id = ?
+    ''', (num_dist_restraints, model_id))
+
+def insert_quality_em(db, pdb_id, *, resolution_A=None, q_score=None):
+    model_id = select_model_id(db, pdb_id)
+    db.execute('''\
+            INSERT INTO quality_em (model_id, resolution_A, q_score)
+            VALUES (?, ?, ?)
+    ''', (model_id, resolution_A, q_score))
+
+def insert_quality_clashscore(db, pdb_id, clashscore):
+    model_id = select_model_id(db, pdb_id)
+    db.execute('''\
+            INSERT INTO quality_clashscore (model_id, clashscore)
+            VALUES (?, ?)
+    ''', (model_id, clashscore))
+
 def insert_chain_clusters(db, clusters):
     db.sql('INSERT INTO chain_cluster SELECT chain_id, cluster FROM clusters')
 
@@ -411,45 +442,51 @@ def create_model_indices(db):
 
 
 def select_models(db):
-    return db.execute(f'SELECT * FROM model').pl()
+    return db.execute('SELECT * FROM model').pl()
+
+def select_model_id(db, pdb_id):
+    return db.execute('SELECT * FROM model').fetchone()[0]
 
 def select_model_blacklist(db):
-    return db.execute(f'SELECT * FROM model_blacklist').pl()
+    return db.execute('SELECT * FROM model_blacklist').pl()
 
 def select_qualities_xtal(db):
-    return db.execute(f'SELECT * FROM quality_xtal').pl()
+    return db.execute('SELECT * FROM quality_xtal').pl()
 
 def select_qualities_nmr(db):
-    return db.execute(f'SELECT * FROM quality_nmr').pl()
+    return db.execute('SELECT * FROM quality_nmr').pl()
 
 def select_qualities_em(db):
-    return db.execute(f'SELECT * FROM quality_em').pl()
+    return db.execute('SELECT * FROM quality_em').pl()
+
+def select_qualities_clashscore(db):
+    return db.execute('SELECT * FROM quality_clashscore').pl()
 
 def select_assemblies(db):
-    return db.execute(f'SELECT * FROM assembly').pl()
+    return db.execute('SELECT * FROM assembly').pl()
 
 def select_chains(db):
-    return db.execute(f'SELECT * FROM chain').pl()
+    return db.execute('SELECT * FROM chain').pl()
 
 def select_chain_clusters(db):
-    return db.execute(f'SELECT * FROM chain_cluster').pl()
+    return db.execute('SELECT * FROM chain_cluster').pl()
 
 def select_entities(db):
-    return db.execute(f'SELECT * FROM entity').pl()
+    return db.execute('SELECT * FROM entity').pl()
 
 def select_entity_polymers(db):
-    return db.execute(f'SELECT * FROM entity_polymer').pl()
+    return db.execute('SELECT * FROM entity_polymer').pl()
 
 def select_entity_nonpolymers(db):
-    return db.execute(f'SELECT * FROM entity_nonpolymer').pl()
+    return db.execute('SELECT * FROM entity_nonpolymer').pl()
 
 def select_entity_clusters(db):
-    return db.execute(f'SELECT * FROM entity_cluster').pl()
+    return db.execute('SELECT * FROM entity_cluster').pl()
 
 def select_assembly_chain_pairs(db):
-    return db.execute(f'SELECT * FROM assembly_chain').pl()
+    return db.execute('SELECT * FROM assembly_chain').pl()
 
 def select_chain_entity_pairs(db):
-    return db.execute(f'SELECT * FROM chain_entity').pl()
+    return db.execute('SELECT * FROM chain_entity').pl()
 
 

@@ -10,8 +10,11 @@ Arguments:
 import numpy as np
 import polars as pl
 
-from .working_db import open_db, init_db, insert_model, select_models
-from .error import UsageError
+from .working_db import (
+        open_db, init_db, transaction,
+        insert_model, select_models, create_model_indices,
+)
+from .error import IngestError, add_path_to_ingest_error
 from gemmi.cif import read as read_cif
 from scipy.optimize import milp, Bounds, LinearConstraint
 from itertools import chain
@@ -60,56 +63,52 @@ def ingest_models(db, cif_paths):
                 cif_paths,
                 chunksize=10,
         ):
-            insert_model(db, **kwargs)
+            with transaction(db):
+                insert_model(db, **kwargs)
+
+    create_model_indices(db)
 
 def _get_insert_model_kwargs(cif_path):
-    with UsageError.add_info('path: {path}', path=cif_path):
-        try:
-            cif = read_cif(str(cif_path)).sole_block()
-            pdb_id = cif.name.lower()
+    with add_path_to_ingest_error(cif_path):
+        cif = read_cif(str(cif_path)).sole_block()
+        pdb_id = cif.name.lower()
 
-            atom_site = _extract_dataframe(
-                    cif, 'atom_site',
-                    required_cols=[
-                        'auth_asym_id',
-                        'label_asym_id',
-                        'label_entity_id',
-                    ],
-                    optional_cols=[
-                        'pdbx_PDB_model_num',
-                    ],
-            )
-            id_map = _make_chain_subchain_entity_id_map(atom_site)
-            assembly_chain_pairs = _find_covering_assembly_chain_pairs(
-                    _extract_dataframe(cif, 'pdbx_struct_assembly_gen'),
-                    id_map,
-            )
-            chain_entity_pairs = _find_chain_entity_pairs(id_map)
+        atom_site = _extract_dataframe(
+                cif, 'atom_site',
+                required_cols=[
+                    'auth_asym_id',
+                    'label_asym_id',
+                    'label_entity_id',
+                ],
+                optional_cols=[
+                    'pdbx_PDB_model_num',
+                ],
+        )
+        id_map = _make_chain_subchain_entity_id_map(atom_site)
+        assembly_chain_pairs = _find_covering_assembly_chain_pairs(
+                _extract_dataframe(cif, 'pdbx_struct_assembly_gen'),
+                id_map,
+        )
+        chain_entity_pairs = _find_chain_entity_pairs(id_map)
 
-            return dict(
-                    pdb_id=pdb_id,
+        return dict(
+                pdb_id=pdb_id,
 
-                    exptl_methods=_extract_exptl_methods(cif),
-                    deposit_date=_extract_deposit_date(cif),
-                    num_atoms=_find_num_atoms(atom_site),
+                exptl_methods=_extract_exptl_methods(cif),
+                deposit_date=_extract_deposit_date(cif),
+                num_atoms=_find_num_atoms(atom_site),
 
-                    quality_xtal=_extract_quality_xtal(cif),
-                    quality_nmr=_extract_quality_nmr(cif),
-                    quality_em=_extract_quality_em(cif),
+                quality_xtal=_extract_quality_xtal(cif),
+                quality_nmr=_extract_quality_nmr(cif),
+                quality_em=_extract_quality_em(cif),
 
-                    assembly_chain_pairs=assembly_chain_pairs,
-                    chain_entity_pairs=chain_entity_pairs,
+                chains=chains,
+                assembly_chain_pairs=assembly_chain_pairs,
+                chain_entity_pairs=chain_entity_pairs,
 
-                    polymers=_extract_polymers(cif),
-                    nonpolymers=_extract_nonpolymers(cif),
-            )
-
-        except UsageError:
-            raise
-
-        except Exception as err1:
-            summary = str(err1).split('\n')[0]
-            raise UsageError(summary) from err1
+                polymers=_extract_polymers(cif),
+                nonpolymers=_extract_nonpolymers(cif),
+        )
 
 def _extract_dataframe(cif, key_prefix, *, required_cols=None, optional_cols=None):
     loop = cif.get_mmcif_category(f'_{key_prefix}.')
@@ -127,7 +126,7 @@ def _extract_dataframe(cif, key_prefix, *, required_cols=None, optional_cols=Non
     if required_cols:
         missing_cols = [x for x in required_cols if x not in df.columns]
         if missing_cols:
-            err = UsageError(
+            err = IngestError(
                     category=key_prefix,
                     missing_cols=missing_cols,
             )

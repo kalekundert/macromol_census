@@ -30,6 +30,7 @@ doc = [
 ]
 [project.scripts]
 mmc_ingest_mmcif = "macromol_census.ingest_mmcif:main"
+mmc_ingest_validation = "macromol_census.ingest_validation:main"
 mmc_extract_fasta = "macromol_census.extract_fasta:main"
 mmc_ingest_blacklist = "macromol_census.ingest_blacklist:main"
 mmc_ingest_entity_clusters = "macromol_census.ingest_entity_clusters:main"
