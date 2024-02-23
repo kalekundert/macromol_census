@@ -44,6 +44,12 @@ def test_extract_clashscore_6dze():
     cif = read_cif(str(CIF_DIR / '6dze_validation.cif.gz')).sole_block()
     assert mmci._extract_clashscore(cif) == approx(27.27)
 
+def test_extract_clashscore_4iio():
+    # This validation file specifies a clashscore of "-1.00".  I assume that 
+    # this is some sort of error code, so I replace it with null.
+    cif = read_cif(str(CIF_DIR / '4iio_validation.cif.gz')).sole_block()
+    assert mmci._extract_clashscore(cif) is None
+
 def test_ingest_validation_report_2wls():
     # This validation file doesn't properly specify a PDB ID, so instead this 
     # information has to be parsed from the file name.

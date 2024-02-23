@@ -53,6 +53,10 @@ def init_db(db):
                 num_reflections REAL,
                 r_free REAL,
                 r_work REAL,
+                CHECK (resolution_A > 0),
+                CHECK (num_reflections > 0),
+                CHECK (r_free > 0),
+                CHECK (r_work > 0),
                 FOREIGN KEY (model_id) REFERENCES model(id)
             );
 
@@ -60,6 +64,7 @@ def init_db(db):
                 model_id INT NOT NULL,
                 pdb_conformer_id STRING,
                 num_dist_restraints INT,
+                CHECK (num_dist_restraints > 0),
                 FOREIGN KEY (model_id) REFERENCES model(id)
             );
 
@@ -67,12 +72,15 @@ def init_db(db):
                 model_id INT NOT NULL,
                 resolution_A REAL,
                 q_score REAL,
+                CHECK (resolution_A > 0),
+                CHECK (q_score >= 0 AND q_score <= 1),
                 FOREIGN KEY (model_id) REFERENCES model(id)
             );
 
             CREATE TABLE IF NOT EXISTS quality_clashscore (
                 model_id INT NOT NULL,
                 clashscore REAL,
+                CHECK (clashscore >= 0),
                 FOREIGN KEY (model_id) REFERENCES model(id)
             );
 

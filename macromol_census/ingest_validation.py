@@ -131,5 +131,6 @@ def _extract_clashscore(cif):
             )
             .get_column('clashscore')
             .cast(float, strict=False)
+            .replace(-1, None)
     )
 
