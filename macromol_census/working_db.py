@@ -36,7 +36,7 @@ def init_db(db):
                 pdb_id STRING,
                 exptl_methods EXPTL_METHOD[],
                 deposit_date DATE,
-                num_atoms INT,
+                full_atom BOOLEAN,
             );
 
             CREATE TABLE IF NOT EXISTS model_blacklist (
@@ -197,7 +197,7 @@ def insert_model(
         *,
         exptl_methods,
         deposit_date,
-        num_atoms,
+        full_atom,
         quality_xtal=None,
         quality_nmr=None,
         quality_em=None,
@@ -236,7 +236,7 @@ def insert_model(
             db, pdb_id,
             exptl_methods=exptl_methods,
             deposit_date=deposit_date,
-            num_atoms=num_atoms,
+            full_atom=full_atom,
     )
 
     # Sorting the ids isn't really necessary, but it makes testing easier.  
@@ -309,12 +309,13 @@ def insert_model(
     _insert_assembly_chain_pairs(db, assembly_chain_pairs)
     _insert_chain_entity_pairs(db, chain_entity_pairs)
 
-def _insert_model(db, pdb_id, *, exptl_methods, deposit_date, num_atoms):
+def _insert_model(db, pdb_id, *, exptl_methods, deposit_date, full_atom):
+    assert full_atom in (True, False)
     cur = db.execute('''\
-            INSERT INTO model (pdb_id, exptl_methods, deposit_date, num_atoms)
+            INSERT INTO model (pdb_id, exptl_methods, deposit_date, full_atom)
             VALUES (?, ?, ?, ?)
             RETURNING id''',
-            (pdb_id, exptl_methods, deposit_date, num_atoms),
+            (pdb_id, exptl_methods, deposit_date, full_atom),
     )
     model_id, = cur.fetchone()
     return model_id

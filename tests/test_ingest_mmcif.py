@@ -41,7 +41,7 @@ def test_find_uningested_paths():
             '9xyz',
             exptl_methods=['X-RAY DIFFRACTION'],
             deposit_date=date(year=2024, month=2, day=16),
-            num_atoms=1000,
+            full_atom=True,
             assembly_chain_pairs=pl.DataFrame([
                 dict(assembly_id='1', chain_id='A'),
             ]),
@@ -74,7 +74,7 @@ def test_ingest_model_4erd():
                 pdb_id='4erd',
                 exptl_methods=['X-RAY DIFFRACTION'],
                 deposit_date=date(year=2012, month=4, day=19),
-                num_atoms=2787,
+                full_atom=True,
             ),
     ]
     assert_frame_equal(
@@ -183,7 +183,7 @@ def test_ingest_model_6wiv():
                 pdb_id='6wiv',
                 exptl_methods=['ELECTRON MICROSCOPY'],
                 deposit_date=date(year=2020, month=4, day=10),
-                num_atoms=11206,
+                full_atom=True,
             ),
     ]
     assert_frame_equal(
@@ -222,8 +222,8 @@ def test_ingest_model_6wiv():
             pl.DataFrame([
                 dict(id=1, model_id=1, pdb_id='A'),
                 dict(id=2, model_id=1, pdb_id='B'),
-                ]),
-            )
+            ]),
+    )
     assert_frame_equal(
             mmc.select_entities(db),
             pl.DataFrame([
@@ -234,16 +234,16 @@ def test_ingest_model_6wiv():
                 dict(id=5, model_id=1, pdb_id='5'),
                 dict(id=6, model_id=1, pdb_id='6'),
                 dict(id=7, model_id=1, pdb_id='7'),
-                ]),
-            )
+            ]),
+    )
     assert_frame_equal(
             mmc.select_assembly_chain_pairs(db),
             pl.DataFrame([
                 dict(assembly_id=1, chain_id=1),
                 dict(assembly_id=1, chain_id=2),
-                ]),
+            ]),
             check_row_order=False,
-            )
+    )
     assert_frame_equal(
             # Each protein subunit is binding a different lipid (U3G and U3D, 
             # respectively).  Furthermore, one subunit is also binding a 
@@ -300,6 +300,108 @@ def test_ingest_model_6wiv():
     )
 
     assert mmc.select_qualities_xtal(db).is_empty()
+    assert mmc.select_qualities_nmr(db).is_empty()
+
+def test_ingest_model_2iy3():
+    # 2iy3 is not a full-atom structure; it contains protein and RNA, but only 
+    # specifies a single coordinate for each residue.
+
+    db = mmc.open_db(':memory:')
+    mmc.init_db(db)
+
+    mmc.ingest_models(db, [CIF_DIR / '2iy3.cif.gz'])
+
+    assert mmc.select_models(db).to_dicts() == [
+            dict(
+                id=1,
+                pdb_id='2iy3',
+                exptl_methods=['ELECTRON MICROSCOPY'],
+                deposit_date=date(year=2006, month=7, day=12),
+                full_atom=False,
+            ),
+    ]
+    assert_frame_equal(
+            mmc.select_assemblies(db),
+            pl.DataFrame([
+                dict(id=1, model_id=1, pdb_id='1'),
+            ]),
+    )
+    assert_frame_equal(
+            mmc.select_chains(db),
+            pl.DataFrame([
+                dict(id=1, model_id=1, pdb_id='A'),
+                dict(id=2, model_id=1, pdb_id='B'),
+                dict(id=3, model_id=1, pdb_id='C'),
+            ]),
+    )
+    assert_frame_equal(
+            mmc.select_entities(db),
+            pl.DataFrame([
+                dict(id=1, model_id=1, pdb_id='1'),
+                dict(id=2, model_id=1, pdb_id='2'),
+                dict(id=3, model_id=1, pdb_id='3'),
+            ]),
+    )
+    assert_frame_equal(
+            mmc.select_assembly_chain_pairs(db),
+            pl.DataFrame([
+                dict(assembly_id=1, chain_id=1),
+                dict(assembly_id=1, chain_id=2),
+                dict(assembly_id=1, chain_id=3),
+            ]),
+            check_row_order=False,
+    )
+    assert_frame_equal(
+            # Each protein subunit is binding a different lipid (U3G and U3D, 
+            # respectively).  Furthermore, one subunit is also binding a 
+            # calcium ion.  The other ligands are not specifically bound, and 
+            # are present in both chains.
+
+            mmc.select_chain_entity_pairs(db),
+            pl.DataFrame([
+                dict(chain_id=1, entity_id=1), # protein
+                dict(chain_id=2, entity_id=2), # RNA
+                dict(chain_id=3, entity_id=3), # peptide
+            ]),
+            check_row_order=False,
+    )
+    assert_frame_equal(
+            mmc.select_entity_polymers(db),
+            pl.DataFrame([
+                dict(
+                    entity_id=1,
+                    type='polypeptide(L)',
+                    sequence='MFQQLSARLQEAIGRLRGRGRITEEDLKATLREIRRALMDADVNLEVARDFVERVREEALGKQVLESLTPAEVILATVYEALKEALGGEARLPVLKDRNLWFLVGLQGSGKTTTAAKLALYYKGKGRRPLLVAADTQRPAAREQLRLLGEKVGVPVLEVMDGESPESIRRRVEEKARLEARDLILVDTAGRLQIDEPLMGELARLKEVLGPDEVLLVLDAMTGQEALSVARAFDEKVGVTGLVLTKLDGDARGGAALSARHVTGKPIYFAGVSEKPEGLEPFYPERLAGRILGMGDIESILEKVKGLEEYDKIQKKMEDVMEGKGKLTLRDVYAQIIALRKMGPLSKVLQHIPGLGIMLPTPSEDQLKIGEEKIRRWLAALNSMTYKELENPNIIDKSRMRRIAEGSGLEVEEVRELLEWYNNMNRLLKMVK',
+                ),
+                dict(
+                    entity_id=2,
+                    type='polyribonucleotide',
+                    sequence='GGGGGCUCUGUUGGUUCUCCCGCAACGCUACUCUGUUUACCAGGUCAGGUCCGAAAGGAAGCAGCCAAGGCAGAUGACGCGUGUGCCGGGAUGUAGCUGGCAGGGCCCCC',
+                ),
+                dict(
+                    entity_id=3,
+                    type='polypeptide(L)',
+                    sequence='AALALAAAAALALAAAG',
+                ),
+            ]),
+            check_row_order=False,
+    )
+    assert_frame_equal(
+            mmc.select_qualities_xtal(db),
+            pl.DataFrame([
+                dict(model_id=1, resolution_A=16, num_reflections=None, r_free=None, r_work=None),
+            ]),
+            check_exact=False,
+    )
+    assert_frame_equal(
+            mmc.select_qualities_em(db),
+            pl.DataFrame([
+                dict(model_id=1, resolution_A=16, q_score=None),
+            ]),
+            check_exact=False,
+    )
+
+    assert mmc.select_entity_nonpolymers(db).is_empty()
     assert mmc.select_qualities_nmr(db).is_empty()
 
 def test_make_chain_subchain_entity_map():

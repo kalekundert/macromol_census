@@ -72,7 +72,6 @@ def ingest_models(db, cif_paths):
     #             insert_model(db, **kwargs)
 
     for cif_path in cif_paths:
-         debug(cif_path)
          kwargs = _get_insert_model_kwargs(cif_path)
          with transaction(db):
              insert_model(db, **kwargs)
@@ -90,6 +89,7 @@ def _get_insert_model_kwargs(cif_path):
                     'auth_asym_id',
                     'label_asym_id',
                     'label_entity_id',
+                    'label_seq_id',
                 ],
                 optional_cols=[
                     'pdbx_PDB_model_num',
@@ -115,7 +115,7 @@ def _get_insert_model_kwargs(cif_path):
 
                 exptl_methods=_extract_exptl_methods(cif),
                 deposit_date=_extract_deposit_date(cif),
-                num_atoms=_find_num_atoms(atom_site),
+                full_atom=_is_full_atom(atom_site),
 
                 quality_xtal=_extract_quality_xtal(cif),
                 quality_nmr=_extract_quality_nmr(cif),
@@ -271,8 +271,16 @@ def _make_chain_subchain_entity_id_map(atom_site):
             .unique()
     )
 
-def _find_num_atoms(atom_site):
-    return atom_site.group_by('pdbx_PDB_model_num').len()['len'].max()
+def _is_full_atom(atom_site):
+    return (
+            atom_site
+            .lazy()
+            .group_by('label_asym_id', 'label_seq_id')
+            .len()
+            .select((pl.col('len') > 1).any())
+            .collect()
+            .item()
+    )
 
 def _find_covering_assembly_chain_pairs(struct_assembly_gen, id_map):
     if struct_assembly_gen.is_empty():

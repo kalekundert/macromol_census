@@ -53,7 +53,7 @@ def db():
             db, '9xyz',
             exptl_methods=['X-RAY DIFFRACTION'],
             deposit_date=date(year=2024, month=2, day=16),
-            num_atoms=1000,
+            full_atom=True,
             assembly_chain_pairs=assembly_chain_pairs,
             chain_entity_pairs=chain_entity_pairs,
             polymers=polymers,
@@ -72,7 +72,7 @@ def test_model(db):
                 pdb_id='9xyz',
                 exptl_methods=['X-RAY DIFFRACTION'],
                 deposit_date=date(year=2024, month=2, day=16),
-                num_atoms=1000,
+                full_atom=True,
             ),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
