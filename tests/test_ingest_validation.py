@@ -15,24 +15,29 @@ def test_extract_em_6dzp():
     cif = read_cif(str(CIF_DIR / '6dzp_validation.cif.gz')).sole_block()
     quality = mmci._extract_em_resolution_q_score(cif)
     assert quality == {
-            'resolution_A': approx(3.40),  # FSC with 0.143 cutoff
+            'resolution_A': approx(3.42),  # EMDB resolution
             'q_score': approx(0.464),
     }
     
 def test_extract_em_8dzr():
-    # 8dzr has a "calculated" resolution, while 6dzp has a "user specified" 
-    # resolution.  Need to check for both.
+    # I originally included this test case because it has "calculated", as 
+    # opposed to "author provided", FSC resolutions.  However, since then, I 
+    # decided to use only the EMDB resolution, so the distinction doesn't 
+    # really matter any more.  I kept the test case, though, in case I ever go 
+    # back to the old behavior.
 
     cif = read_cif(str(CIF_DIR / '8dzr_validation.cif.gz')).sole_block()
     quality = mmci._extract_em_resolution_q_score(cif)
     assert quality == {
-            'resolution_A': approx(3.09),
+            'resolution_A': approx(2.61),
             'q_score': approx(0.485),
     }
     
 def test_extract_em_6eri():
-    # This validation file is unusual in that it specifies the string "None" as 
-    # a resolution.  This has to be handled specially.
+    # This validation file is unusual in that it specifies the string "None" 
+    # for all the FSC resolutions.  I'm no longer using these resolutions, so 
+    # this doesn't really matter anymore, but previously I had to account for 
+    # this specially.
     cif = read_cif(str(CIF_DIR / '6eri_validation.cif.gz')).sole_block()
     quality = mmci._extract_em_resolution_q_score(cif)
     assert quality == {

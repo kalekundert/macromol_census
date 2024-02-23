@@ -73,7 +73,7 @@ def init_db(db):
                 resolution_A REAL,
                 q_score REAL,
                 CHECK (resolution_A > 0),
-                CHECK (q_score >= 0 AND q_score <= 1),
+                CHECK (q_score >= -1 AND q_score <= 1),
                 FOREIGN KEY (model_id) REFERENCES model(id)
             );
 

@@ -93,33 +93,21 @@ def _extract_nmr_restraints(cif):
     return int(row['value'])
 
 def _extract_em_resolution_q_score(cif):
-    cols = [
-            'calculated_fsc_resolution_by_cutoff_pt_143',
-            'author_provided_fsc_resolution_by_cutoff_pt_143',
-            'EMDB_resolution',
-            'Q_score',
-    ]
-
     return only(
             _extract_dataframe(
                 cif, 'pdbx_vrpt_summary_em',
-                optional_cols=cols,
-            )
-            .lazy()
-            # Need to cast before coalescing, because we want to ignore values 
-            # that can't be parsed for any reason.
-            .select(
-                pl.col(*cols).cast(float, strict=False)
-            )
-            .select(
-                resolution_A=pl.coalesce(
-                    'calculated_fsc_resolution_by_cutoff_pt_143',
-                    'author_provided_fsc_resolution_by_cutoff_pt_143',
+                optional_cols=[
                     'EMDB_resolution',
-                ),
+                    'Q_score',
+                ],
+            )
+            .select(
+                resolution_A='EMDB_resolution',
                 q_score='Q_score',
             )
-            .collect()
+            .select(
+                pl.col('*').cast(float, strict=False)
+            )
             .to_dicts()
     )
 
