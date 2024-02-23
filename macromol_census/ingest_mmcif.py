@@ -55,16 +55,27 @@ def find_uningested_paths(db, cif_paths, pdb_id_from_path):
     ]
 
 def ingest_models(db, cif_paths):
-    from multiprocessing import get_context
+    # Multiprocessing makes this go faster, but causes weird incompatibilities 
+    # with tidyexc.  This is ultimately a bug in tidyexc, and I want to fix it 
+    # eventually, but for now I'm just going to return to the non-parallel 
+    # algorithm.
 
-    with get_context("spawn").Pool() as pool:
-        for kwargs in pool.imap_unordered(
-                _get_insert_model_kwargs,
-                cif_paths,
-                chunksize=10,
-        ):
-            with transaction(db):
-                insert_model(db, **kwargs)
+    # from multiprocessing import get_context
+    # 
+    # with get_context("spawn").Pool() as pool:
+    #     for kwargs in pool.imap_unordered(
+    #             _get_insert_model_kwargs,
+    #             cif_paths,
+    #             chunksize=10,
+    #     ):
+    #         with transaction(db):
+    #             insert_model(db, **kwargs)
+
+    for cif_path in cif_paths:
+         debug(cif_path)
+         kwargs = _get_insert_model_kwargs(cif_path)
+         with transaction(db):
+             insert_model(db, **kwargs)
 
     create_model_indices(db)
 
@@ -84,9 +95,17 @@ def _get_insert_model_kwargs(cif_path):
                     'pdbx_PDB_model_num',
                 ],
         )
+        struct_assembly_gen = _extract_dataframe(
+                cif, 'pdbx_struct_assembly_gen',
+                required_cols=[
+                    'assembly_id',
+                    'asym_id_list',
+                ],
+        )
+
         id_map = _make_chain_subchain_entity_id_map(atom_site)
         assembly_chain_pairs = _find_covering_assembly_chain_pairs(
-                _extract_dataframe(cif, 'pdbx_struct_assembly_gen'),
+                struct_assembly_gen,
                 id_map,
         )
         chain_entity_pairs = _find_chain_entity_pairs(id_map)
@@ -102,7 +121,6 @@ def _get_insert_model_kwargs(cif_path):
                 quality_nmr=_extract_quality_nmr(cif),
                 quality_em=_extract_quality_em(cif),
 
-                chains=chains,
                 assembly_chain_pairs=assembly_chain_pairs,
                 chain_entity_pairs=chain_entity_pairs,
 
@@ -111,16 +129,28 @@ def _get_insert_model_kwargs(cif_path):
         )
 
 def _extract_dataframe(cif, key_prefix, *, required_cols=None, optional_cols=None):
+    # Gemmi automatically interprets `?` and `.`, but this leads to a few 
+    # problems.  First is that it makes column dtypes dependent on the data; if 
+    # a column doesn't have any non-null values, polars won't know that it 
+    # should be a string.  Second is that gemmi distinguishes between `?` 
+    # (null) and `.` (false).  This is a particularly unhelpful distinction 
+    # when the column in question is supposed to contain float data, because 
+    # the latter then becomes 0 rather than null.
+    #
+    # To avoid these problems, we explicitly specify a schema where each column 
+    # is a string.  Doing this happens to convert any booleans present in the 
+    # data to null, thereby solving both of the above problems at once.
+
     loop = cif.get_mmcif_category(f'_{key_prefix}.')
-    df = pl.DataFrame(loop)
+    df = pl.DataFrame(loop, {k: str for k in loop})
+
+    expected_cols = list(chain(
+        required_cols or [],
+        optional_cols or [],
+    ))
 
     if df.is_empty():
-        schema = {
-                col: str for col in chain(
-                    required_cols or [],
-                    optional_cols or [],
-                )
-        }
+        schema = {col: str for col in expected_cols}
         return pl.DataFrame([], schema)
 
     if required_cols:
@@ -142,7 +172,11 @@ def _extract_dataframe(cif, key_prefix, *, required_cols=None, optional_cols=Non
             if col not in df.columns
         ])
 
-    return df
+    return (
+            df
+            .select(*expected_cols)
+            .filter(~pl.all_horizontal(pl.all().is_null()))
+    )
 
 def _extract_exptl_methods(cif):
     exptl = _extract_dataframe(cif, 'exptl', required_cols=['method'])
@@ -220,7 +254,10 @@ def _extract_polymers(cif):
     )
 
 def _extract_nonpolymers(cif):
-    entity_nonpoly = _extract_dataframe(cif, 'pdbx_entity_nonpoly')
+    entity_nonpoly = _extract_dataframe(
+            cif, 'pdbx_entity_nonpoly',
+            required_cols=['entity_id', 'comp_id'],
+    )
     return None if entity_nonpoly.is_empty() else entity_nonpoly
 
 def _make_chain_subchain_entity_id_map(atom_site):

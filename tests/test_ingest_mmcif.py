@@ -66,7 +66,7 @@ def test_ingest_model_4erd():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
-    mmci._ingest_model(db, CIF_DIR / '4erd.cif.gz')
+    mmc.ingest_models(db, [CIF_DIR / '4erd.cif.gz'])
 
     assert mmc.select_models(db).to_dicts() == [
             dict(
@@ -166,6 +166,141 @@ def test_ingest_model_4erd():
 
     assert mmc.select_qualities_nmr(db).is_empty()
     assert mmc.select_qualities_em(db).is_empty()
+
+def test_ingest_model_6wiv():
+    # 6wiv causes problems because it specifies `_refine.ls_d_res_high` as `.`.  
+    # Somehow this ends up getting interpreted as 0, which give incorrect 
+    # results when filtering for the lowest resolution structures.
+
+    db = mmc.open_db(':memory:')
+    mmc.init_db(db)
+
+    mmc.ingest_models(db, [CIF_DIR / '6wiv.cif.gz'])
+
+    assert mmc.select_models(db).to_dicts() == [
+            dict(
+                id=1,
+                pdb_id='6wiv',
+                exptl_methods=['ELECTRON MICROSCOPY'],
+                deposit_date=date(year=2020, month=4, day=10),
+                num_atoms=11206,
+            ),
+    ]
+    assert_frame_equal(
+            mmc.select_assemblies(db),
+            pl.DataFrame([
+                dict(id=1, model_id=1, pdb_id='1'),
+            ]),
+    )
+
+    # Manually determined subchain/chain/entity map:
+    #
+    # Subchain  Chain  Entity
+    # ========  =====  ======
+    # A         A      1
+    # B         B      2
+    # C         A      3
+    # D         A      3
+    # E         A      3
+    # F         A      4
+    # G         A      5
+    # H         A      6
+    # I         A      6
+    # J         A      6
+    # K         A      6
+    # L         B      3
+    # M         B      7
+    # N         B      6
+    # O         B      6
+    # P         B      6
+    # Q         B      6
+    # R         B      6
+    # S         B      6
+
+    assert_frame_equal(
+            mmc.select_chains(db),
+            pl.DataFrame([
+                dict(id=1, model_id=1, pdb_id='A'),
+                dict(id=2, model_id=1, pdb_id='B'),
+                ]),
+            )
+    assert_frame_equal(
+            mmc.select_entities(db),
+            pl.DataFrame([
+                dict(id=1, model_id=1, pdb_id='1'),
+                dict(id=2, model_id=1, pdb_id='2'),
+                dict(id=3, model_id=1, pdb_id='3'),
+                dict(id=4, model_id=1, pdb_id='4'),
+                dict(id=5, model_id=1, pdb_id='5'),
+                dict(id=6, model_id=1, pdb_id='6'),
+                dict(id=7, model_id=1, pdb_id='7'),
+                ]),
+            )
+    assert_frame_equal(
+            mmc.select_assembly_chain_pairs(db),
+            pl.DataFrame([
+                dict(assembly_id=1, chain_id=1),
+                dict(assembly_id=1, chain_id=2),
+                ]),
+            check_row_order=False,
+            )
+    assert_frame_equal(
+            # Each protein subunit is binding a different lipid (U3G and U3D, 
+            # respectively).  Furthermore, one subunit is also binding a 
+            # calcium ion.  The other ligands are not specifically bound, and 
+            # are present in both chains.
+
+            mmc.select_chain_entity_pairs(db),
+            pl.DataFrame([
+                dict(chain_id=1, entity_id=1), # protein
+                dict(chain_id=1, entity_id=3), # resn NAG
+                dict(chain_id=1, entity_id=4), # resn CA
+                dict(chain_id=1, entity_id=5), # resn U3G
+                dict(chain_id=1, entity_id=6), # resn CLR
+
+                dict(chain_id=2, entity_id=2), # protein
+                dict(chain_id=2, entity_id=3), # resn NAG
+                dict(chain_id=2, entity_id=6), # resn CLR
+                dict(chain_id=2, entity_id=7), # resn U3D
+            ]),
+            check_row_order=False,
+    )
+    assert_frame_equal(
+            mmc.select_entity_polymers(db),
+            pl.DataFrame([
+                dict(
+                    entity_id=1,
+                    type='polypeptide(L)',
+                    sequence='MGPGAPFARVGWPLPLLVVMAAGVAPVWASHSPHLPRPHSRVPPHPSSERRAVYIGALFPMSGGWPGGQACQPAVEMALEDVNSRRDILPDYELKLIHHDSKCDPGQATKYLYELLYNDPIKIILMPGCSSVSTLVAEAARMWNLIVLSYGSSSPALSNRQRFPTFFRTHPSATLHNPTRVKLFEKWGWKKIATIQQTTEVFTSTLDDLEERVKEAGIEITFRQSFFSDPAVPVKNLKRQDARIIVGLFYETEARKVFCEVYKERLFGKKYVWFLIGWYADNWFKIYDPSINCTVDEMTEAVEGHITTEIVMLNPANTRSISNMTSQEFVEKLTKRLKRHPEETGGFQEAPLAYDAIWALALALNKTSGGGGRSGVRLEDFNYNNQTITDQIYRAMNSSSFEGVSGHVVFDASGSRMAWTLIEQLQGGSYKKIGYYDSTKDDLSWSKTDKWIGGSPPADQTLVIKTFRFLSQKLFISVSVLSSLGIVLAVVCLSFNIYNSHVRYIQNSQPNLNNLTAVGCSLALAAVFPLGLDGYHIGRNQFPFVCQARLWLLGLGFSLGYGSMFTKIWWVHTVFTKKEEKKEWRKTLEPWKLYATVGLLVGMDVLTLAIWQIVDPLHRTIETFAKEEPKEDIDVSILPQLEHCSSRKMNTWLGIFYGYKGLLLLLGIFLAYETKSVSTEKINDHRAVGMAIYNVAVLCLITAPVTMILSSQQDAAFAFASLAIVFSSYITLVVLFVPKMRRLITRGEWQSEAQDTMKTGSSTNNNEEEKSRLLEKENRELEKIIAEKEERVSELRHQLQSRDYKDDDDK',
+                ),
+                dict(
+                    entity_id=2,
+                    type='polypeptide(L)',
+                    sequence='MASPRSSGQPGPPPPPPPPPARLLLLLLLPLLLPLAPGAWGWARGAPRPPPSSPPLSIMGLMPLTKEVAKGSIGRGVLPAVELAIEQIRNESLLRPYFLDLRLYDTECDNAKGLKAFYDAIKYGPNHLMVFGGVCPSVTSIIAESLQGWNLVQLSFAATTPVLADKKKYPYFFRTVPSDNAVNPAILKLLKHYQWKRVGTLTQDVQRFSEVRNDLTGVLYGEDIEISDTESFSNDPCTSVKKLKGNDVRIILGQFDQNMAAKVFCCAYEENMYGSKYQWIIPGWYEPSWWEQVHTEANSSRCLRKNLLAAMEGYIGVDFEPLSSKQIKTISGKTPQQYEREYNNKRSGVGPSKFHGYAYDGIWVIAKTLQRAMETLHASSRHQRIQDFNYTDHTLGRIILNAMNETNFFGVTGQVVFRNGERMGTIKFTQFQDSREVKVGEYNAVADTLEIINDTIRFQGSEPPKDKTIILEQLRKISLPLYSILSALTILGMIMASAFLFFNIKNRNQKLIKMSSPYMNNLIILGGMLSYASIFLFGLDGSFVSEKTFETLCTVRTWILTVGYTTAFGAMFAKTWRVHAIFKNVKMKKKIIKDQKLLVIVGGMLLIDLCILICWQAVDPLRRTVEKYSMEPDPAGRDISIRPLLEHCENTHMTIWLGIVYAYKGLLMLFGCFLAWETRNVSIPALNDSKYIGMSVYNVGIMCIIGAAVSFLTRDQPNVQFCIVALVIIFCSTITLCLVFVPKLITLRTNPDAATQNRRFQFTQNQKKEDSKTSTSVTSVNQASTSRLEGLQSENHRLRMKITELDKDLEEVTMQLQDTDYKDDDDK',
+                ),
+            ]),
+            check_row_order=False,
+    )
+    assert_frame_equal(
+            mmc.select_entity_nonpolymers(db),
+            pl.DataFrame([
+                dict(entity_id=3, pdb_comp_id='NAG'),
+                dict(entity_id=4, pdb_comp_id='CA'),
+                dict(entity_id=5, pdb_comp_id='U3G'),
+                dict(entity_id=6, pdb_comp_id='CLR'),
+                dict(entity_id=7, pdb_comp_id='U3D'),
+            ]),
+            check_row_order=False,
+    )
+    assert_frame_equal(
+            mmc.select_qualities_em(db),
+            pl.DataFrame([
+                dict(model_id=1, resolution_A=3.3, q_score=None),
+            ]),
+    )
+
+    assert mmc.select_qualities_xtal(db).is_empty()
+    assert mmc.select_qualities_nmr(db).is_empty()
 
 def test_make_chain_subchain_entity_map():
     atom_site = pl.DataFrame([
