@@ -118,14 +118,14 @@ def test_model_blacklist(db):
     ]
 
 def test_quality_nmr(db):
-    mmc.update_quality_nmr(db, '9xyz', num_dist_restraints=162)
+    mmc.update_quality_nmr(db, 1, num_dist_restraints=162)
 
     assert mmc.select_qualities_nmr(db).to_dicts() == [
             dict(model_id=1, pdb_conformer_id='1', num_dist_restraints=162),
     ]
 
 def test_quality_em(db):
-    mmc.insert_quality_em(db, '9xyz', resolution_A=3.3, q_score=0.5)
+    mmc.insert_quality_em(db, 1, resolution_A=3.3, q_score=0.5)
     
     assert mmc.select_qualities_em(db).to_dicts() == [
             dict(model_id=1, resolution_A=approx(3.4), q_score=None),
@@ -133,7 +133,7 @@ def test_quality_em(db):
     ]
 
 def test_quality_clashscore(db):
-    mmc.insert_quality_clashscore(db, '9xyz', clashscore=27.2)
+    mmc.insert_quality_clashscore(db, 1, clashscore=27.2)
 
     assert mmc.select_qualities_clashscore(db).to_dicts() == [
             dict(model_id=1, clashscore=approx(27.2)),

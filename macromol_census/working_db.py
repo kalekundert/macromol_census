@@ -405,26 +405,23 @@ def insert_model_blacklist(db, blacklist):
             JOIN model USING (pdb_id)
     ''')
 
-def update_quality_nmr(db, pdb_id, *, num_dist_restraints=None):
+def update_quality_nmr(db, model_id, *, num_dist_restraints=None):
     # It would be safer to insert a new row instead of updating a row that, in 
     # principle, might not exist, or might not be unique.  But I've separately 
     # measured that each NMR structure will have exactly one row in this table.
-    model_id = select_model_id(db, pdb_id)
     db.execute('''\
             UPDATE quality_nmr
             SET num_dist_restraints = ?
             WHERE model_id = ?
     ''', (num_dist_restraints, model_id))
 
-def insert_quality_em(db, pdb_id, *, resolution_A=None, q_score=None):
-    model_id = select_model_id(db, pdb_id)
+def insert_quality_em(db, model_id, *, resolution_A=None, q_score=None):
     db.execute('''\
             INSERT INTO quality_em (model_id, resolution_A, q_score)
             VALUES (?, ?, ?)
     ''', (model_id, resolution_A, q_score))
 
-def insert_quality_clashscore(db, pdb_id, clashscore):
-    model_id = select_model_id(db, pdb_id)
+def insert_quality_clashscore(db, model_id, clashscore):
     db.execute('''\
             INSERT INTO quality_clashscore (model_id, clashscore)
             VALUES (?, ?)
@@ -438,14 +435,18 @@ def insert_entity_clusters(db, clusters):
 
 
 def create_model_indices(db):
-    db.execute('CREATE UNIQUE INDEX model_pdb_id ON model (pdb_id)')
+    db.execute('''\
+            DROP INDEX IF EXISTS model_pdb_id;
+            CREATE UNIQUE INDEX model_pdb_id ON model (pdb_id);
+    ''')
 
 
 def select_models(db):
     return db.execute('SELECT * FROM model').pl()
 
 def select_model_id(db, pdb_id):
-    return db.execute('SELECT * FROM model').fetchone()[0]
+    cur = db.execute('SELECT id FROM model WHERE pdb_id = ?', (pdb_id,))
+    return cur.fetchone()[0]
 
 def select_model_blacklist(db):
     return db.execute('SELECT * FROM model_blacklist').pl()

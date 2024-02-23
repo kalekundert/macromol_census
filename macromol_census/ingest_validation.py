@@ -14,9 +14,10 @@ Arguments:
 """
 
 import polars as pl
+import re
 
 from .working_db import (
-        open_db, transaction,
+        open_db, transaction, select_model_id,
         update_quality_nmr, insert_quality_em, insert_quality_clashscore,
 )
 from .ingest_mmcif import _extract_dataframe
@@ -50,14 +51,27 @@ def ingest_validation_report(db, cif_path):
         cif = read_cif(str(cif_path)).sole_block()
         pdb_id = cif.name.lower()
 
+        # At the time I wrote this code, there were 30 validation reports that 
+        # didn't specify a PDB ID, instead just giving the string "BlockName".  
+        # In these cases, try to parse the ID from the file name, and give up 
+        # if that doesn't work.
+
+        if pdb_id == 'blockname':
+            if m := re.match(r'(\w{4})_validation.cif.gz', cif_path.name):
+                pdb_id = m.group(1)
+            else:
+                return
+
+        model_id = select_model_id(db, pdb_id)
+
         if n := _extract_nmr_restraints(cif):
-            update_quality_nmr(db, pdb_id, num_dist_restraints=n)
+            update_quality_nmr(db, model_id, num_dist_restraints=n)
 
         if kw := _extract_em_resolution_q_score(cif):
-            insert_quality_em(db, pdb_id, **kw)
+            insert_quality_em(db, model_id, **kw)
 
         if x := _extract_clashscore(cif):
-            insert_quality_clashscore(db, pdb_id, clashscore=x)
+            insert_quality_clashscore(db, model_id, clashscore=x)
 
 def _extract_nmr_restraints(cif):
     restraint_summary = _extract_dataframe(
