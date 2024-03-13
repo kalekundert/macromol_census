@@ -279,17 +279,13 @@ def init_db(db):
     # Redundancy:
     db.execute('''\
             CREATE TABLE IF NOT EXISTS nonredundant (
-                assembly_id INT NOT NULL,
                 subchain_id INT,
-                FOREIGN KEY(assembly_id) REFERENCES assembly(id),
                 FOREIGN KEY(subchain_id) REFERENCES subchain(id)
             );
 
             CREATE TABLE IF NOT EXISTS nonredundant_pair (
-                assembly_id INT NOT NULL,
                 subchain_id_1 INT,
                 subchain_id_2 INT,
-                FOREIGN KEY(assembly_id) REFERENCES assembly(id),
                 FOREIGN KEY(subchain_id_1) REFERENCES subchain(id),
                 FOREIGN KEY(subchain_id_2) REFERENCES subchain(id)
             );
@@ -772,3 +768,8 @@ def select_em_quality(db):
 def select_clashscores(db):
     return db.execute('SELECT * FROM quality_clashscore').pl()
 
+def select_nonredundant_subchains(db):
+    return db.execute('SELECT * FROM nonredundant').pl()
+
+def select_nonredundant_subchain_pairs(db):
+    return db.execute('SELECT * FROM nonredundant_pair').pl()
