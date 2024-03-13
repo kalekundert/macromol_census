@@ -1,6 +1,6 @@
 """\
 Usage:
-    extract_fasta <in:db> <in:type> [<out:fasta>] [-l <length>]
+    extract_fasta <in:db> <in:type> [<out:fasta>] [-l <length>] [-f]
 
 Arguments:
     <in:db>
@@ -35,9 +35,12 @@ Arguments:
 Options:
     -l --min-length <int>       [default: 0]
         Only include sequences that are longer than the given length
+
+    -f --force
+        If the output file already exists, overwrite it.
 """
 
-from .working_db import open_db
+from .database_io import open_db
 from .error import UsageError
 from pathlib import Path
 from difflib import get_close_matches
@@ -68,8 +71,12 @@ def main():
     args = docopt.docopt(__doc__)
     db = open_db(db_cli := args['<in:db>'])
     types = get_types(type_cli := args['<in:type>'])
-    fasta = args['<out:fasta>'] or f'{Path(db_cli).stem}_{type_cli}.fasta'.replace('-', '_')
+    fasta = Path(args['<out:fasta>'] or f'{Path(db_cli).stem}_{type_cli}.fasta'.replace('-', '_'))
     min_length = int(args['--min-length'])
+
+    if fasta.exists() and not args['--force']:
+        print(f'abort: file already exists: {fasta}')
+        raise SystemExit
 
     df = select_entity_sequences(
             db, types,
@@ -94,18 +101,19 @@ def select_entity_sequences(db, types, *, min_length):
     return db.execute(f'''\
             SELECT 
                 entity.id AS entity_id,
-                arbitrary(model.pdb_id) AS model_pdb_id,
+                structure.pdb_id AS struct_pdb_id,
+                entity.pdb_id AS entity_pdb_id,
                 list(chain.pdb_id) AS chain_pdb_ids,
                 arbitrary(sequence) AS sequence,
             FROM entity_polymer
             JOIN entity ON (entity.id == entity_polymer.entity_id)
-            JOIN model ON (model.id == entity.model_id)
-            JOIN chain_entity ON (entity.id == chain_entity.entity_id)
-            JOIN chain ON (chain.id == chain_entity.chain_id)
-            WHERE type IN ({', '.join('?' * len(types))})
+            JOIN structure ON (structure.id == entity.struct_id)
+            JOIN subchain ON (entity.id == subchain.entity_id)
+            JOIN chain ON (chain.id == subchain.chain_id)
+            WHERE entity_polymer.type IN ({', '.join('?' * len(types))})
             AND length(sequence) > ?
-            GROUP BY entity.id
-            ORDER BY entity.id
+            GROUP BY entity.id, structure.pdb_id, entity.pdb_id
+            ORDER BY structure.pdb_id, entity.pdb_id
     ''', (*types, min_length,)).pl()
 
 def write_fasta(df, out_path):
@@ -113,12 +121,18 @@ def write_fasta(df, out_path):
     from Bio.Seq import Seq
     from Bio.SeqRecord import SeqRecord
 
+    # It would be a little simpler for my code if I referred to entities by 
+    # their primary key id, instead of their composite PDB ids.  However, the 
+    # latter format is compatible with the clusters distributed by the PDB 
+    # itself, which I think might be valuable.  It's also more intuitive for 
+    # users, and possibly easier to use with third party tools.
+
     SeqIO.write(
             (
                 SeqRecord(
                     Seq(row['sequence']),
-                    id=str(row['entity_id']),
-                    description=f'model={row["model_pdb_id"]} chains={",".join(row["chain_pdb_ids"])}',
+                    id='{struct_pdb_id}_{entity_pdb_id}'.format_map(row),
+                    description=f'chains={",".join(row["chain_pdb_ids"])}',
                 )
                 for row in df.iter_rows(named=True)
             ),

@@ -1,6 +1,6 @@
 """\
 Usage:
-    mmc_ingest_entity_clusters <in:db> <in:tsv>
+    mmc_ingest_entity_clusters <in:db> <in:tsv> [<in:type>]
 
 Arguments:
     <in:db>
@@ -9,30 +9,65 @@ Arguments:
 
     <in:tsv>
         A tab-separated file with two columns: The first should contain a 
-        unique string for each cluster of "equivalent" entities.  The second 
-        should contain an id number referencing one of the entities in the 
-        database created by `mmc_ingest_models`.  The FASTA files created by 
-        `mmc_extract_fasta` provide these id numbers as the name of each 
-        sequence entry, so any clustering program that identifies sequences by 
-        name will work.
+        unique integer for each cluster of "equivalent" entities.  The second 
+        should contain an string identifying a specific entity in the following 
+        format: '{PDB id}_{entity id}'.  The FASTA files created by 
+        `mmc_extract_fasta` name each sequence in this manner, so any 
+        clustering program that identifies sequences by name will work.
 
         The MMseqs2 program generates TSV files in a suitable format for this 
         script.  It's possible that other clustering programs do, as well.
+
+    <in:type>
+        An identifier that can be used to distinguish between different 
+        clusterings.  For example, it's possible that clusterings of both 
+        protein and DNA sequences would have a cluster "1", but these aren't 
+        the same cluster.  By default, the type is taken from the file name of 
+        the given TSV file.
 """
 
 import polars as pl
-from .working_db import open_db, insert_entity_clusters
+
+from .database_io import open_db, insert_entity_clusters
+from pathlib import Path
 
 def main():
     from docopt import docopt
     args = docopt(__doc__)
 
     db = open_db(args['<in:db>'])
-    clusters = pl.read_csv(
-            source=args['<in:tsv>'],
-            separator='\t',
-            has_header=False,
-            new_columns=['cluster', 'entity_id'],
-    )
+    tsv = Path(args['<in:tsv>'])
+    namespace = args['<in:type>'] or tsv.stem
 
-    insert_entity_clusters(db, clusters)
+    clusters = load_entity_clusters(db, tsv)
+    insert_entity_clusters(db, clusters, namespace)
+
+def load_entity_clusters(db, path):
+    pdb_ids = db.sql('''\
+            SELECT
+                entity.id as entity_id,
+                structure.pdb_id as struct_pdb_id,
+                entity.pdb_id as entity_pdb_id
+            FROM entity
+            JOIN structure ON (structure.id = entity.struct_id)
+    ''').pl()
+    df = (
+            pl.read_csv(
+                source=path,
+                separator='\t',
+                has_header=False,
+                new_columns=['cluster_id', 'pdb_ids'],
+            )
+            .with_columns(
+                struct_pdb_id=pl.col('pdb_ids').str.slice(0,4).str.to_lowercase(),
+                entity_pdb_id=pl.col('pdb_ids').str.slice(5),
+            )
+    )
+    df = (
+            df
+            .join(
+                pdb_ids,
+                on=['struct_pdb_id', 'entity_pdb_id'],
+            )
+    )
+    return df

@@ -1,221 +1,774 @@
-import sqlite3
-import numpy as np
+import duckdb
 import polars as pl
-import networkx as nx
-import io
+from contextlib import contextmanager
 
-from enum import Enum
-from dataclasses import dataclass
-from more_itertools import one
-
-@dataclass
-class Structure:
-    pdb_id: str
-    atoms: pl.DataFrame
-    interpro_available: bool
-
-class InterProEntryType(Enum):
-    DOMAIN = 'domain'
-    FAMILY = 'family'
-    SUPERFAMILY = 'superfamily'
-
-@dataclass
-class InterProEntry:
-    id: str
-    type: InterProEntryType
-
-class NotFound(Exception):
-    pass
+# The naming conventions used to refer to different parts of a PDB entry are 
+# confusing and inconsistent [1].  The tables in this database follow the 
+# structure → model → chain → subchain → residue hierarchy used by `gemmi`.  
+# This convention seems reasonably well thought-out, and it's convenient to use 
+# the same names as the parsing library we're using.
+#
+# [1]: https://gemmi.readthedocs.io/en/latest/mol.html#pdbx-mmcif-format
 
 def open_db(path):
-    """
-    .. warning::
-        It's not safe to fork the database connection object returned by this 
-        function.  Thus, either avoid using the ``"fork"`` multiprocessing 
-        context (e.g. with ``torch.utils.data.DataLoader``), or don't open the 
-        database until already within the subprocess.
-
-    .. warning::
-        The database connection returned by this function does not have 
-        autocommit behavior enabled, so the caller is responsible for 
-        committing/rolling back transactions as necessary.
-    """
-    sqlite3.register_adapter(pl.DataFrame, _adapt_dataframe)
-    sqlite3.register_converter('DATA_FRAME', _convert_dataframe)
-
-    sqlite3.register_adapter(InterProEntryType, _adapt_interpro_entry_type)
-    sqlite3.register_converter('ENTRY_TYPE', _convert_interpro_entry_type)
-
-    db = sqlite3.connect(
-            path,
-            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-    )
-    db.execute('PRAGMA foreign_keys = ON')
-    db.execute('PRAGMA encoding = UTF8')
-
-    return db
+    return duckdb.connect(path)
 
 def init_db(db):
-    cur = db.cursor()
 
-    cur.execute('''\
-            CREATE TABLE IF NOT EXISTS metadata (
-                key UNIQUE,
-                value
-            )
+    # Structures:
+    db.execute('''\
+            DROP TYPE IF EXISTS EXPTL_METHOD;
+            CREATE TYPE EXPTL_METHOD AS ENUM (
+                'ELECTRON CRYSTALLOGRAPHY',
+                'ELECTRON MICROSCOPY',
+                'EPR',
+                'FIBER DIFFRACTION',
+                'FLUORESCENCE TRANSFER',
+                'INFRARED SPECTROSCOPY',
+                'NEUTRON DIFFRACTION',
+                'POWDER DIFFRACTION',
+                'SOLID-STATE NMR',
+                'SOLUTION NMR',
+                'SOLUTION SCATTERING',
+                'THEORETICAL MODEL',
+                'X-RAY DIFFRACTION'
+            );
+
+            CREATE SEQUENCE IF NOT EXISTS structure_id;
+            CREATE TABLE IF NOT EXISTS structure (
+                id INT DEFAULT nextval('structure_id') PRIMARY KEY,
+                pdb_id STRING NOT NULL,
+                exptl_methods EXPTL_METHOD[],
+                deposit_date DATE,
+                full_atom BOOLEAN NOT NULL,
+                rank INT
+            );
+
+            CREATE TABLE IF NOT EXISTS structure_blacklist (
+                struct_id INT NOT NULL,
+                FOREIGN KEY (struct_id) REFERENCES structure(id)
+            );
     ''')
-    cur.execute('''\
-            CREATE TABLE IF NOT EXISTS structures (
+
+    # Clusters:
+    db.execute('''\
+            CREATE SEQUENCE IF NOT EXISTS cluster_id;
+            CREATE TABLE IF NOT EXISTS cluster (
+                id INT DEFAULT nextval('cluster_id') PRIMARY KEY,
+                namespace STRING NOT NULL,
+                name STRING NOT NULL,
+                UNIQUE (name, namespace)
+            );
+    ''')
+
+    # Models:
+    db.execute('''\
+            -- This table doesn't contain every model in the structure, only
+            -- those that are consistent with the rest of the relationships
+            -- stored in this database.  (There are a small number of 
+            -- structures with different sets of subchains and/or different
+            -- entity/subchain relationships in different models.  Fully 
+            -- accounting for this would make the database much more complex,
+            -- for little benefit, so instead we just keep track of which 
+            -- models are actually described by the database.)
+
+            CREATE SEQUENCE IF NOT EXISTS model_id;
+            CREATE TABLE IF NOT EXISTS model (
+                id INT DEFAULT nextval('model_id') PRIMARY KEY,
+                struct_id INT NOT NULL,
+                pdb_id STRING NOT NULL,
+                FOREIGN KEY (struct_id) REFERENCES structure(id)
+            );
+    ''')
+
+    # Chains:
+    db.execute('''\
+            CREATE SEQUENCE IF NOT EXISTS chain_id;
+            CREATE TABLE IF NOT EXISTS chain (
+                id INT DEFAULT nextval('chain_id') PRIMARY KEY,
+                struct_id INT NOT NULL,
+                pdb_id STRING NOT NULL,
+                FOREIGN KEY(struct_id) REFERENCES structure(id)
+            );
+    ''')
+
+    # Entities:
+    db.execute('''\
+            DROP TYPE IF EXISTS ENTITY_TYPE;
+            -- According to the mmCIF/PDBx dictionary, 'macrolide' is another
+            -- valid entity type.  However, as of 2024/02/14, there are no 
+            -- such entities in the PDB.
+            CREATE TYPE ENTITY_TYPE AS ENUM (
+                'polymer',
+                'non-polymer',
+                'branched',
+                'water'
+            );
+
+            DROP TYPE IF EXISTS POLYMER_TYPE;
+            CREATE TYPE POLYMER_TYPE AS ENUM (
+                'cyclic-pseudo-peptide',
+                'other',
+                'peptide nucleic acid',
+                'polydeoxyribonucleotide',
+                'polydeoxyribonucleotide/polyribonucleotide hybrid',
+                'polypeptide(D)',
+                'polypeptide(L)',
+                'polyribonucleotide'
+            );
+
+            DROP TYPE IF EXISTS BRANCHED_TYPE;
+            CREATE TYPE BRANCHED_TYPE AS ENUM (
+                'oligosaccharide'
+            );
+
+            CREATE SEQUENCE IF NOT EXISTS entity_id;
+            CREATE TABLE IF NOT EXISTS entity (
+                id INT DEFAULT nextval('entity_id') PRIMARY KEY,
+                struct_id INT NOT NULL,
+                pdb_id STRING NOT NULL,
+                type ENTITY_TYPE NOT NULL,
+                formula_weight_Da FLOAT,
+                FOREIGN KEY(struct_id) REFERENCES structure(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS entity_polymer (
+                entity_id INT NOT NULL,
+                type POLYMER_TYPE,
+                sequence STRING,
+                FOREIGN KEY(entity_id) REFERENCES entity(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS entity_branched (
+                entity_id INT NOT NULL,
+                type BRANCHED_TYPE,
+                FOREIGN KEY(entity_id) REFERENCES entity(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS entity_branched_bond (
+                entity_id INT NOT NULL,
+                pdb_seq_id_1 STRING NOT NULL,
+                pdb_comp_id_1 STRING NOT NULL,
+                pdb_atom_id_1 STRING NOT NULL,
+                pdb_seq_id_2 STRING NOT NULL,
+                pdb_comp_id_2 STRING NOT NULL,
+                pdb_atom_id_2 STRING NOT NULL,
+                bond_order STRING NOT NULL,
+                FOREIGN KEY(entity_id) REFERENCES entity(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS entity_monomer (
+                entity_id INT NOT NULL,
+                pdb_comp_id STRING NOT NULL,
+                FOREIGN KEY(entity_id) REFERENCES entity(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS entity_ignore (
+                entity_id INT NOT NULL,
+                FOREIGN KEY(entity_id) REFERENCES entity(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS entity_cluster (
+                entity_id INT NOT NULL,
+                cluster_id INT NOT NULL,
+                FOREIGN KEY(entity_id) REFERENCES entity(id),
+                FOREIGN KEY(cluster_id) REFERENCES cluster(id)
+            );
+    ''')
+
+    # Components:
+    db.execute('''\
+            CREATE TABLE IF NOT EXISTS component (
                 pdb_id STRING PRIMARY KEY,
-                atoms_parquet DATA_FRAME,
-                interpro_available BOOLEAN
+                inchi STRING,
+                inchi_key STRING
+            );
+    ''')
+
+    # Subchains:
+    db.execute('''\
+            CREATE SEQUENCE IF NOT EXISTS subchain_id;
+            CREATE TABLE IF NOT EXISTS subchain (
+                id INT DEFAULT nextval('subchain_id') PRIMARY KEY,
+                chain_id INT NOT NULL,
+                entity_id INT NOT NULL,
+                pdb_id STRING NOT NULL,
+                FOREIGN KEY(chain_id) REFERENCES chain(id),
+                FOREIGN KEY(entity_id) REFERENCES entity(id)
+            );
+    ''');
+
+    # Assemblies:
+    db.execute('''\
+            CREATE SEQUENCE IF NOT EXISTS assembly_id;
+            CREATE TABLE IF NOT EXISTS assembly (
+                id INT DEFAULT nextval('assembly_id') PRIMARY KEY,
+                struct_id INT NOT NULL,
+                pdb_id STRING NOT NULL,
+                FOREIGN KEY(struct_id) REFERENCES structure(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS assembly_subchain (
+                assembly_id INT NOT NULL,
+                subchain_id INT NOT NULL,
+                FOREIGN KEY(assembly_id) REFERENCES assembly(id),
+                FOREIGN KEY(subchain_id) REFERENCES subchain(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS assembly_subchain_cover (
+                assembly_id INT NOT NULL,
+                FOREIGN KEY(assembly_id) REFERENCES assembly(id)
             )
     ''')
-    cur.execute('''\
-            CREATE TABLE interpro_entries (
-                interpro_id TEXT PRIMARY KEY,
-                type ENTRY_TYPE
-            )
+
+    # Quality:
+    db.execute('''\
+            DROP TYPE IF EXISTS MMCIF_DICT;
+            CREATE TYPE MMCIF_DICT AS ENUM (
+                -- These are the names of the mmCIF dictionaries that quality 
+                -- data can come from.  "vrpt" stands for "validation report".
+                'mmcif_pdbx',
+                'mmcif_pdbx_vrpt'
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_xtal (
+                struct_id INT NOT NULL,
+                source MMCIF_DICT NOT NULL,
+                resolution_A REAL,
+                r_work REAL,
+                r_free REAL,
+                CHECK (resolution_A > 0),
+                CHECK (r_free > 0),
+                CHECK (r_work > 0),
+                FOREIGN KEY (struct_id) REFERENCES structure(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_nmr (
+                struct_id INT NOT NULL,
+                source MMCIF_DICT NOT NULL,
+                num_dist_restraints INT,
+                CHECK (num_dist_restraints > 0),
+                FOREIGN KEY (struct_id) REFERENCES structure(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_nmr_representative (
+                model_id INT NOT NULL,
+                source MMCIF_DICT NOT NULL,
+                FOREIGN KEY (model_id) REFERENCES model(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_em (
+                struct_id INT NOT NULL,
+                source MMCIF_DICT NOT NULL,
+                resolution_A REAL,
+                q_score REAL,
+                CHECK (resolution_A > 0),
+                CHECK (q_score >= -1 AND q_score <= 1),
+                FOREIGN KEY (struct_id) REFERENCES structure(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS quality_clashscore (
+                struct_id INT NOT NULL,
+                source MMCIF_DICT NOT NULL,
+                clashscore REAL,
+                CHECK (clashscore >= 0),
+                FOREIGN KEY (struct_id) REFERENCES structure(id)
+            );
     ''')
-    cur.execute('''\
-            CREATE TABLE homology_interpro (
-                pdb_id TEXT,
-                interpro_id TEXT,
-                FOREIGN KEY(pdb_id) REFERENCES structures(pdb_id),
-                FOREIGN KEY(interpro_id) REFERENCES interpro_entries(interpro_id)
-            )
+
+    # Redundancy:
+    db.execute('''\
+            CREATE TABLE IF NOT EXISTS nonredundant (
+                assembly_id INT NOT NULL,
+                subchain_id INT,
+                FOREIGN KEY(assembly_id) REFERENCES assembly(id),
+                FOREIGN KEY(subchain_id) REFERENCES subchain(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS nonredundant_pair (
+                assembly_id INT NOT NULL,
+                subchain_id_1 INT,
+                subchain_id_2 INT,
+                FOREIGN KEY(assembly_id) REFERENCES assembly(id),
+                FOREIGN KEY(subchain_id_1) REFERENCES subchain(id),
+                FOREIGN KEY(subchain_id_2) REFERENCES subchain(id)
+            );
     ''')
-    cur.execute('''\
-            CREATE TABLE homology_mmseqs2 (
-                pdb_id TEXT,
-                cluster_id INTEGER,
-                FOREIGN KEY(pdb_id) REFERENCES structures(pdb_id)
-            )
-    ''')
+
     db.commit()
 
-
-def insert_metadata(db, meta):
-    db.executemany(
-            'INSERT INTO metadata (key, value) VALUES (?, ?)',
-            meta.items(),
-    )
-
-def insert_structure(db, structure):
-    db.execute('''\
-            INSERT INTO structures (pdb_id, atoms_parquet, interpro_available)
-            VALUES (?, ?, ?)''',
-            (structure.pdb_id, structure.atoms, structure.interpro_available),
-    )
-
-def insert_interpro_homology_edge(db, pdb_id, interpro_entry):
-    db.execute('''\
-            INSERT OR IGNORE INTO interpro_entries (interpro_id, type)
-            VALUES (?, ?)''',
-            (interpro_entry.id, interpro_entry.type),
-    )
-    db.execute('''\
-            INSERT INTO homology_interpro (pdb_id, interpro_id)
-            VALUES (?, ?)''',
-            (pdb_id, interpro_entry.id),
-    )
-
-def insert_mmseqs2_homology_edge(db, pdb_id, cluster_id):
-    db.execute('''\
-            INSERT INTO homology_mmseqs2 (pdb_id, cluster_id)
-            VALUES (?, ?)''',
-            (pdb_id, cluster_id),
-    )
-
-
-def load_metadata(db):
-    cur = db.execute('SELECT key, value FROM metadata')
-    return dict(cur.fetchall())
-
-def load_structure(db, pdb_id):
-    cur = db.execute(
-            'SELECT * FROM structures WHERE pdb_id=?',
-            (pdb_id,),
-    )
-    cur.row_factory = _dataclass_row_factory(
-            Structure,
-            {'atoms_parquet': 'atoms'},
-    )
-
-    if struct := cur.fetchone():
-        return struct
+@contextmanager
+def transaction(db):
+    db.execute('BEGIN TRANSACTION')
+    try:
+        yield
+    except:
+        db.execute('ROLLBACK')
+        raise
     else:
-        raise NotFound(f"can't find structure with PDB id: {pdb_id}")
+        db.execute('COMMIT')
 
-def load_pdb_ids(db, require_interpro=True):
-    if require_interpro:
-        sql = 'SELECT pdb_id FROM structures WHERE interpro_available=TRUE'
-    else:
-        sql = 'SELECT pdb_id FROM structures'
 
-    cur = db.execute(sql)
-    cur.row_factory = _scalar_row_factory
+def insert_structure(
+        db,
+        pdb_id,
+        *,
+        exptl_methods,
+        deposit_date,
+        full_atom,
+        models=None,
+        assembly_subchains,
+        subchains,
+        entities,
+        polymer_entities=None,
+        branched_entities=None,
+        branched_entity_bonds=None,
+        monomer_entities=None,
+        xtal_quality=None,
+        nmr_representative=None,
+        em_quality=None,
+):
+    """
+    Insert the given structure into the given database.
 
-    return cur.fetchall()
+    The main role of this function is to translate PDB id numbers to database 
+    primary key numbers.  The data frames provided to this function describe 
+    all the relationships between the models, assemblies, chains, subchains, 
+    and entities in the structure in terms of the id numbers used by the PDB.  
+    This function works out how to express all the same relationships using 
+    globally unique keys.
 
-def load_homology_graph(db):
-    g = nx.Graph()
+    This function should be used within a transaction, since the database could 
+    end up in a corrupt state if a structure is only partially ingested.  
+    However, responsibility for transaction handling is left to the caller.
+    """
 
-    # PDB nodes
-    g.add_nodes_from(
-            (('pdb', pdb_id), {})
-            for pdb_id in load_pdb_ids(db)
+    ## Rename id columns:
+
+    # Switch to the column naming convention where `*_id` refers to an SQL 
+    # primary key and `pdb_*_id` refers to the ids used in the mmCIF file (and 
+    # other PDB-associated resources).
+
+    def label_pdb_ids(df, cols):
+        if df is None: return None
+        return df.sort(cols).rename({x: f'pdb_{x}' for x in cols})
+
+    models = label_pdb_ids(models, ['id'])
+    assembly_subchains = label_pdb_ids(
+            assembly_subchains, ['assembly_id', 'subchain_id']
+    )
+    subchains = label_pdb_ids(subchains, ['id', 'chain_id', 'entity_id'])
+    entities = label_pdb_ids(entities, ['id'])
+    polymer_entities = label_pdb_ids(polymer_entities, ['entity_id'])
+    branched_entities = label_pdb_ids(branched_entities, ['entity_id'])
+    branched_entity_bonds = label_pdb_ids(branched_entity_bonds, ['entity_id'])
+    monomer_entities = label_pdb_ids(monomer_entities, ['entity_id'])
+
+    ## Process and sanity-check inputs:
+
+    # Sorting the ids isn't necessary, but it makes testing easier.  I assume 
+    # the runtime cost is negligible, but I haven't benchmarked it.  Note that 
+    # the `label_pdb_ids()` function above also sorts by id.
+
+    assemblies = (
+            assembly_subchains
+            .select(pdb_id=pl.col('pdb_assembly_id').unique().sort())
+    )
+    chains = (
+            subchains
+            .select(pdb_id=pl.col('pdb_chain_id').unique().sort())
     )
 
-    # InterPro nodes
-    cur = db.execute('SELECT interpro_id, type FROM interpro_entries')
-    g.add_nodes_from(
-            (('interpro', interpro_id), dict(type=interpro_type))
-            for interpro_id, interpro_type in cur.fetchall()
-    )
-    cur = db.execute('SELECT pdb_id, interpro_id FROM homology_interpro')
-    g.add_edges_from(
-            (('pdb', pdb_id), ('interpro', interpro_id))
-            for pdb_id, interpro_id in cur.fetchall()
+    assert not subchains['pdb_id'].is_duplicated().any()
+    assert (
+            set(subchains['pdb_id']) == 
+            set(assembly_subchains['pdb_subchain_id'])
     )
 
-    # MMseqs2 nodes
-    cur = db.execute('SELECT pdb_id, cluster_id FROM homology_mmseqs2')
-    g.add_edges_from(
-            (('pdb', pdb_id), ('mmseqs2', cluster_id))
-            for pdb_id, cluster_id in cur.fetchall()
+    # Some structures have entities that aren't in any biological assembly.  
+    # I've found one case where this was an error (3km0) and one where it 
+    # wasn't (3ttm).  I decided to address this by loosening this check, since 
+    # it doesn't really hurt to have "extra" entities in the database, and 
+    # having this information will let me to a more thorough review of 
+    # structures like this.
+    assert (
+            set(entities['pdb_id']) >=
+            set(subchains['pdb_entity_id'])
     )
 
-    return g
+    def check_entity_ids(types, df):
+        left_ids = set(
+                entities
+                .filter(pl.col('type').is_in(types))
+                .get_column('pdb_id')
+        )
+        right_ids = set() if df is None else set(df['pdb_entity_id'])
+        assert left_ids == right_ids, (types, left_ids, right_ids)
+
+    check_entity_ids(['polymer'], polymer_entities)
+    check_entity_ids(['branched'], branched_entities)
+    check_entity_ids(['branched'], branched_entity_bonds)
+    check_entity_ids(['non-polymer', 'water'], monomer_entities)
+
+    ## Insert everything into the database:
+
+    struct_id = _insert_structure(
+            db, pdb_id,
+            exptl_methods=exptl_methods,
+            deposit_date=deposit_date,
+            full_atom=full_atom,
+    )
+
+    if models is not None:
+        model_ids = _insert_models(db, struct_id, models)
+
+    assembly_ids = _insert_assemblies(db, struct_id, assemblies)
+    chain_ids = _insert_chains(db, struct_id, chains)
+    entity_ids = _insert_entities(db, struct_id, entities)
+
+    subchains = (
+            subchains
+            .join(chain_ids, on='pdb_chain_id')
+            .join(entity_ids, on='pdb_entity_id')
+    )
+    subchain_ids = _insert_subchains(db, subchains)
+
+    assembly_subchains = (
+            assembly_subchains
+            .join(assembly_ids, on='pdb_assembly_id')
+            .join(subchain_ids, on='pdb_subchain_id')
+    )
+    _insert_assembly_subchains(db, assembly_subchains)
+
+    if polymer_entities is not None:
+        polymer_entities = (
+                polymer_entities
+                .join(entity_ids, on='pdb_entity_id')
+        )
+        _insert_polymer_entities(db, polymer_entities)
+
+    if branched_entities is not None:
+        branched_entities = (
+                branched_entities
+                .join(entity_ids, on='pdb_entity_id')
+        )
+        branched_entity_bonds = (
+                branched_entity_bonds
+                .join(entity_ids, on='pdb_entity_id')
+        )
+        _insert_branched_entities(db, branched_entities, branched_entity_bonds)
+
+    if monomer_entities is not None:
+        monomer_entities = (
+                monomer_entities
+                .join(entity_ids, on='pdb_entity_id')
+        )
+        _insert_monomer_entities(db, monomer_entities)
+
+    if xtal_quality is not None:
+        _insert_xtal_quality(db, struct_id, xtal_quality)
+
+    if nmr_representative is not None:
+        assert models is not None
+        model_id = (
+                model_ids
+                .filter(pl.col('pdb_model_id') == nmr_representative)
+                .select('model_id')
+                .item()
+        )
+        _insert_nmr_representative(db, model_id)
+
+    if em_quality is not None:
+        _insert_em_quality(db, struct_id, em_quality)
+
+    return struct_id
+
+def _insert_structure(db, pdb_id, *, exptl_methods, deposit_date, full_atom):
+    cur = db.execute('''\
+            INSERT INTO structure (
+                pdb_id,
+                exptl_methods,
+                deposit_date,
+                full_atom
+            )
+            VALUES (?, ?, ?, ?)
+            RETURNING id''',
+            (pdb_id, exptl_methods, deposit_date, full_atom),
+    )
+    struct_id, = cur.fetchone()
+    return struct_id
+
+def _insert_models(db, struct_id, models):
+    return _insert_pdb_ids(db, 'model', struct_id, models)
+
+def _insert_assemblies(db, struct_id, assemblies):
+    return _insert_pdb_ids(db, 'assembly', struct_id, assemblies)
+
+def _insert_assembly_subchains(db, assembly_subchains):
+    db.execute('''\
+            INSERT INTO assembly_subchain (assembly_id, subchain_id)
+            SELECT assembly_id, subchain_id FROM assembly_subchains
+    ''')
+
+def _insert_chains(db, struct_id, chains):
+    return _insert_pdb_ids(db, 'chain', struct_id, chains)
+
+def _insert_subchains(db, subchains):
+    return db.execute('''\
+            INSERT INTO subchain (chain_id, entity_id, pdb_id)
+            SELECT chain_id, entity_id, pdb_id from subchains
+            RETURNING id AS subchain_id, pdb_id AS pdb_subchain_id
+    ''').pl()
+
+def _insert_entities(db, struct_id, entities):
+    return db.execute('''\
+            INSERT INTO entity (struct_id, pdb_id, type, formula_weight_Da)
+            SELECT ?, pdb_id, type, formula_weight_Da from entities
+            RETURNING id AS entity_id, pdb_id AS pdb_entity_id
+    ''', [struct_id]).pl()
+
+def _insert_polymer_entities(db, polymers):
+    db.execute('''\
+            INSERT INTO entity_polymer (entity_id, type, sequence)
+            SELECT entity_id, type, sequence from polymers
+    ''')
+
+def _insert_branched_entities(db, branched, branched_bonds):
+    db.execute('''\
+            INSERT INTO entity_branched (entity_id, type)
+            SELECT entity_id, type FROM branched;
+
+            INSERT INTO entity_branched_bond (
+                entity_id,
+                pdb_seq_id_1, pdb_comp_id_1, pdb_atom_id_1,
+                pdb_seq_id_2, pdb_comp_id_2, pdb_atom_id_2,
+                bond_order
+            )
+            SELECT 
+                entity_id,
+                seq_id_1, comp_id_1, atom_id_1,
+                seq_id_2, comp_id_2, atom_id_2,
+                bond_order
+            FROM branched_bonds;
+    ''')
+
+def _insert_monomer_entities(db, monomers):
+    db.execute('''\
+            INSERT INTO entity_monomer (entity_id, pdb_comp_id)
+            SELECT entity_id, comp_id FROM monomers
+    ''')
+
+def _insert_xtal_quality(db, struct_id, quality_df):
+    db.execute('''\
+            INSERT INTO quality_xtal (
+                struct_id,
+                source,
+                resolution_A,
+                r_work,
+                r_free
+            )
+            SELECT
+                ?,
+                'mmcif_pdbx',
+                resolution_A,
+                r_work,
+                r_free
+            FROM quality_df
+    ''', [struct_id])
+
+def _insert_nmr_representative(db, model_id):
+    db.execute('''\
+            INSERT INTO quality_nmr_representative (model_id, source)
+            VALUES (?, 'mmcif_pdbx')
+    ''', [model_id])
+
+def _insert_em_quality(db, struct_id, quality_df):
+    db.execute('''\
+            INSERT INTO quality_em (
+                struct_id,
+                source,
+                resolution_A
+            )
+            SELECT
+                ?,
+                'mmcif_pdbx',
+                resolution_A
+            FROM quality_df
+    ''', [struct_id])
+
+def _insert_pdb_ids(db, table, struct_id, pdb_ids):
+    return db.execute(f'''\
+            INSERT INTO {table} (struct_id, pdb_id)
+            SELECT ?, pdb_id FROM pdb_ids
+            RETURNING id AS {table}_id, pdb_id AS pdb_{table}_id''',
+            [struct_id],
+    ).pl()
+
+def update_structure_ranks(db, ranks):
+    db.sql('''\
+            UPDATE structure
+            SET rank = ranks.rank
+            FROM ranks
+            WHERE structure.id = ranks.struct_id
+    ''')
+
+def insert_blacklisted_structures(db, blacklist):
+    db.execute('''\
+            INSERT INTO structure_blacklist (struct_id)
+            SELECT structure.id
+            FROM blacklist
+            JOIN structure USING (pdb_id)
+    ''')
+
+def insert_assembly_subchain_cover(db, cover):
+    db.execute('''\
+            INSERT INTO assembly_subchain_cover (assembly_id)
+            SELECT assembly_id FROM cover
+    ''')
+
+def insert_nmr_quality(db, struct_id, *, source, num_dist_restraints=None):
+    db.execute('''\
+            INSERT INTO quality_nmr (struct_id, source, num_dist_restraints)
+            VALUES (?, ?, ?)
+    ''', [struct_id, source, num_dist_restraints])
+
+def insert_em_quality(db, struct_id, *, source, resolution_A=None, q_score=None):
+    db.execute('''\
+            INSERT INTO quality_em (struct_id, source, resolution_A, q_score)
+            VALUES (?, ?, ?, ?)
+    ''', (struct_id, source, resolution_A, q_score))
+
+def insert_clashscore(db, struct_id, *, source, clashscore):
+    db.execute('''\
+            INSERT INTO quality_clashscore (struct_id, source, clashscore)
+            VALUES (?, ?, ?)
+    ''', (struct_id, source, clashscore))
+
+def insert_nonspecific_ligands(db, ignore):
+    db.sql('''\
+            INSERT INTO entity_ignore (entity_id)
+            SELECT entity_monomer.entity_id
+            FROM ignore
+            JOIN entity_monomer USING (pdb_comp_id)
+    ''')
+
+def insert_entity_clusters(db, clusters, namespace):
+    """
+    Arguments:
+        clusters:
+            A dataframe with columns *entity_id* and *cluster_id*.  For former 
+            must reference a row in the *entity* table.
+    """
+
+    # Ignore singleton clusters.
+    clusters = (
+            clusters
+            .rename({'cluster_id': 'name'})
+            .cast({'name': str})
+            .filter(
+                pl.len().over('name') > 1
+            )
+    )
+    cluster_names = (
+            clusters
+            .unique('name', maintain_order=True)
+    )
+    cluster_ids = db.sql('''\
+            INSERT INTO cluster (namespace, name)
+            SELECT ?, name FROM cluster_names
+            RETURNING id AS cluster_id, name
+    ''', params=[namespace]).pl()
+
+    cluster_edges = (
+            clusters
+            .join(cluster_ids, on='name')
+    )
+    db.sql('''\
+            INSERT INTO entity_cluster (entity_id, cluster_id)
+            SELECT entity_id, cluster_id FROM cluster_edges
+    ''')
+
+def insert_chemical_components(db, components):
+    db.sql('''\
+            INSERT INTO component (pdb_id, inchi, inchi_key)
+            SELECT id, inchi, inchi_key
+            FROM components
+    ''')
+
+def create_structure_indices(db):
+    db.execute('''\
+            DROP INDEX IF EXISTS structure_pdb_id;
+            CREATE UNIQUE INDEX structure_pdb_id ON structure (pdb_id);
+    ''')
 
 
-def _adapt_dataframe(df):
-    out = io.BytesIO()
-    df.write_parquet(out)
-    return out.getvalue()
+def select_structures(db):
+    return db.execute('SELECT * FROM structure').pl()
 
-def _convert_dataframe(bytes):
-    in_ = io.BytesIO(bytes)
-    df = pl.read_parquet(in_)
-    return df
+def select_structure_id(db, pdb_id):
+    cur = db.execute('SELECT id FROM structure WHERE pdb_id = ?', (pdb_id,))
+    return cur.fetchone()[0]
 
-def _adapt_interpro_entry_type(entry_type):
-    return entry_type.value
+def select_blacklisted_structures(db):
+    return db.execute('SELECT * FROM structure_blacklist').pl()
 
-def _convert_interpro_entry_type(bytes):
-    return InterProEntryType(bytes.decode('utf-8'))
+def select_models(db):
+    return db.execute('SELECT * FROM model').pl()
 
-def _dataclass_row_factory(cls, col_map={}):
+def select_clusters(db):
+    return db.execute('SELECT * FROM cluster').pl()
 
-    def factory(cur, row):
-        row_dict = {
-                col_map.get(k := col[0], k): value
-                for col, value in zip(cur.description, row)
-        }
-        return cls(**row_dict)
+def select_assemblies(db):
+    return db.execute('SELECT * FROM assembly').pl()
 
-    return factory
+def select_assembly_subchains(db):
+    return db.execute('SELECT * FROM assembly_subchain').pl()
 
-def _scalar_row_factory(cur, row):
-    return one(row)
+def select_assembly_subchain_covers(db):
+    return db.execute('SELECT * FROM assembly_subchain_cover').pl()
+
+def select_chains(db):
+    return db.execute('SELECT * FROM chain').pl()
+
+def select_subchains(db):
+    return db.execute('SELECT * FROM subchain').pl()
+
+def select_entities(db):
+    return db.execute('SELECT * FROM entity').pl()
+
+def select_entity_clusters(db):
+    return db.execute('SELECT * FROM entity_cluster').pl()
+
+def select_polymer_entities(db):
+    return db.execute('SELECT * FROM entity_polymer').pl()
+
+def select_branched_entities(db):
+    return db.execute('SELECT * FROM entity_branched').pl()
+
+def select_branched_entity_bonds(db):
+    return db.execute('SELECT * FROM entity_branched_bond').pl()
+
+def select_monomer_entities(db):
+    return db.execute('SELECT * FROM entity_monomer').pl()
+
+def select_ignored_entities(db):
+    return db.execute('SELECT * FROM entity_ignore').pl()
+
+def select_chemical_components(db):
+    return db.execute('SELECT * FROM component').pl()
+
+def select_xtal_quality(db):
+    return db.execute('SELECT * FROM quality_xtal').pl()
+
+def select_nmr_quality(db):
+    return db.execute('SELECT * FROM quality_nmr').pl()
+
+def select_nmr_representatives(db):
+    return db.execute('SELECT * FROM quality_nmr_representative').pl()
+
+def select_em_quality(db):
+    return db.execute('SELECT * FROM quality_em').pl()
+
+def select_clashscores(db):
+    return db.execute('SELECT * FROM quality_clashscore').pl()
 

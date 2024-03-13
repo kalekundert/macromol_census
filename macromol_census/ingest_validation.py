@@ -6,7 +6,8 @@ Usage:
 
 Arguments:
     <in:db>
-        The path to a database created by `mmc_ingest_mmcif`.
+        The path to a database created by `mmc_init`, and previously populated 
+        by `mmc_ingest_structures`.
 
     <in:validation-dir>
         The path to a directory containing PDB validation reports, in the 
@@ -16,13 +17,12 @@ Arguments:
 import polars as pl
 import re
 
-from .working_db import (
-        open_db, transaction, select_model_id,
-        update_quality_nmr, insert_quality_em, insert_quality_clashscore,
+from .database_io import (
+        open_db, transaction, select_structure_id,
+        insert_nmr_quality, insert_em_quality, insert_clashscore,
 )
-from .ingest_mmcif import _extract_dataframe
+from .util import read_cif, extract_dataframe
 from .error import add_path_to_ingest_error
-from gemmi.cif import read as read_cif
 from more_itertools import only
 from pathlib import Path
 from tqdm import tqdm
@@ -48,7 +48,7 @@ def ingest_validation_reports(db, cif_paths):
 
 def ingest_validation_report(db, cif_path):
     with add_path_to_ingest_error(cif_path):
-        cif = read_cif(str(cif_path)).sole_block()
+        cif = read_cif(cif_path)
         pdb_id = cif.name.lower()
 
         # At the time I wrote this code, there were 30 validation reports that 
@@ -62,19 +62,20 @@ def ingest_validation_report(db, cif_path):
             else:
                 return
 
-        model_id = select_model_id(db, pdb_id)
+        struct_id = select_structure_id(db, pdb_id)
+        source=dict(source='mmcif_pdbx_vrpt')
 
         if n := _extract_nmr_restraints(cif):
-            update_quality_nmr(db, model_id, num_dist_restraints=n)
+            insert_nmr_quality(db, struct_id, **source, num_dist_restraints=n)
 
         if kw := _extract_em_resolution_q_score(cif):
-            insert_quality_em(db, model_id, **kw)
+            insert_em_quality(db, struct_id, **source, **kw)
 
         if x := _extract_clashscore(cif):
-            insert_quality_clashscore(db, model_id, clashscore=x)
+            insert_clashscore(db, struct_id, **source, clashscore=x)
 
 def _extract_nmr_restraints(cif):
-    restraint_summary = _extract_dataframe(
+    restraint_summary = extract_dataframe(
             cif, 'pdbx_vrpt_restraint_summary',
             required_cols=['description', 'value'],
     )
@@ -94,7 +95,7 @@ def _extract_nmr_restraints(cif):
 
 def _extract_em_resolution_q_score(cif):
     return only(
-            _extract_dataframe(
+            extract_dataframe(
                 cif, 'pdbx_vrpt_summary_em',
                 optional_cols=[
                     'EMDB_resolution',
@@ -113,7 +114,7 @@ def _extract_em_resolution_q_score(cif):
 
 def _extract_clashscore(cif):
     return only(
-            _extract_dataframe(
+            extract_dataframe(
                 cif, 'pdbx_vrpt_summary_geometry',
                 optional_cols=['clashscore'],
             )

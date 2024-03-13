@@ -62,13 +62,17 @@ def test_ingest_validation_report_2wls():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
     db.executemany(
-            'INSERT INTO model (pdb_id) VALUES (?)',
+            'INSERT INTO structure (pdb_id, full_atom) VALUES (?, TRUE)',
             [('9xyz',), ('2wls',)],
     )
     db.sql('SELECT * FROM model').show()
 
     mmc.ingest_validation_report(db, CIF_DIR / '2wls_validation.cif.gz')
 
-    assert mmc.select_qualities_clashscore(db).to_dicts() == [
-            dict(model_id=2, clashscore=approx(11.03)),
+    assert mmc.select_clashscores(db).to_dicts() == [
+            dict(
+                struct_id=2,
+                source='mmcif_pdbx_vrpt',
+                clashscore=approx(11.03),
+            ),
     ]

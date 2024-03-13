@@ -14,8 +14,20 @@ classifiers = [
   'Programming Language :: Python :: 3',
 ]
 dependencies = [
-  #'polars',
+  'biopython',
+  'docopt',
+
+  # The `pick_assemblies` script is affected by duckdb/duckdb#10413, which is 
+  # fixed in version 0.10.0.
+  'duckdb>=0.10.0',
+  'gemmi',
+  'more_itertools',
   'networkx',
+  'numpy',
+  #'polars',
+  'scipy',
+  'tidyexc',
+  'tqdm',
 ]
 
 [project.optional-dependencies]
@@ -29,11 +41,18 @@ doc = [
   'autoclasstoc',
 ]
 [project.scripts]
-mmc_ingest_mmcif = "macromol_census.ingest_mmcif:main"
+mmc_init = "macromol_census.init:main"
+mmc_ingest_structures = "macromol_census.ingest_structures:main"
+mmc_ingest_chemicals = "macromol_census.ingest_chemicals:main"
 mmc_ingest_validation = "macromol_census.ingest_validation:main"
-mmc_extract_fasta = "macromol_census.extract_fasta:main"
 mmc_ingest_blacklist = "macromol_census.ingest_blacklist:main"
 mmc_ingest_entity_clusters = "macromol_census.ingest_entity_clusters:main"
+mmc_ingest_nonspecific_ligands = "macromol_census.ingest_nonspecific_ligands:main"
+mmc_rank_structures = "macromol_census.rank_structures:main"
+mmc_find_assembly_subchain_cover = "macromol_census.find_assembly_subchain_cover:main"
+mmc_find_identical_ligands = "macromol_census.find_identical_ligands:main"
+mmc_find_identical_branched_entities = "macromol_census.find_identical_branched_entities:main"
+mmc_extract_fasta = "macromol_census.extract_fasta:main"
 mmc_pick_assemblies = "macromol_census.pick_assemblies:main"
 
 [project.urls]

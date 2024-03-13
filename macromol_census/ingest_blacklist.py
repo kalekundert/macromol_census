@@ -1,4 +1,4 @@
-"""
+"""\
 Indicate that certain PDB entries should be excluded from the dataset.
 
 Usage:
@@ -6,17 +6,17 @@ Usage:
 
 Arguments:
     <in:db>
-        The path to a database created by the `mmc_ingest_mmcif` command.
+        The path to a database created by the `mmc_init` command.
 
     <in:blacklist>
-        A test file containing a single PDB id on each line.
+        A text file containing a single PDB id on each line.
 
-The intended use of this program is to exclude models that will be used in 
+The intended use of this program is to exclude structures that will be used in 
 downstream validation/test sets.
 """
 
 import polars as pl
-from .working_db import open_db, insert_model_blacklist
+from .database_io import open_db, insert_blacklisted_structures
 
 def main():
     import docopt
@@ -31,7 +31,7 @@ def ingest_blacklist(db, csv_path):
             has_header=False,
             dtypes={'pdb_id': str},
     )
-    insert_model_blacklist(db, blacklist)
+    insert_blacklisted_structures(db, blacklist)
 
 
 

@@ -1,0 +1,72 @@
+import polars as pl
+
+from .error import IngestError
+from itertools import chain
+
+MANUAL_CORRECTIONS = {}
+
+def read_cif(path):
+    from gemmi.cif import read
+    return read(str(path)).sole_block()
+
+def extract_dataframe(
+        cif,
+        key_prefix,
+        *,
+        required_cols=None,
+        optional_cols=None,
+):
+    # Gemmi automatically interprets `?` and `.`, but this leads to a few 
+    # problems.  First is that it makes column dtypes dependent on the data; if 
+    # a column doesn't have any non-null values, polars won't know that it 
+    # should be a string.  Second is that gemmi distinguishes between `?` 
+    # (null) and `.` (false).  This is a particularly unhelpful distinction 
+    # when the column in question is supposed to contain float data, because 
+    # the latter then becomes 0 rather than null.
+    #
+    # To avoid these problems, we explicitly specify a schema where each column 
+    # is a string.  Doing this happens to convert any booleans present in the 
+    # data to null, thereby solving both of the above problems at once.
+
+    pdb_id = cif.name.lower()
+
+    try:
+        df = MANUAL_CORRECTIONS[pdb_id, key_prefix]
+    except KeyError:
+        loop = cif.get_mmcif_category(f'_{key_prefix}.')
+        df = pl.DataFrame(loop, {k: str for k in loop})
+
+    expected_cols = list(chain(
+        required_cols or [],
+        optional_cols or [],
+    ))
+
+    if df.is_empty():
+        schema = {col: str for col in expected_cols}
+        return pl.DataFrame([], schema)
+
+    if required_cols:
+        missing_cols = [x for x in required_cols if x not in df.columns]
+        if missing_cols:
+            err = IngestError(
+                    category=key_prefix,
+                    missing_cols=missing_cols,
+            )
+            err.brief = "missing required column(s)"
+            err.info += "category: _{category}.*"
+            err.blame += "missing column(s): {missing_cols}"
+            raise err
+
+    if optional_cols:
+        df = df.with_columns([
+            pl.lit(None, dtype=str).alias(col)
+            for col in optional_cols
+            if col not in df.columns
+        ])
+
+    return (
+            df
+            .select(*expected_cols)
+            .filter(~pl.all_horizontal(pl.all().is_null()))
+    )
+

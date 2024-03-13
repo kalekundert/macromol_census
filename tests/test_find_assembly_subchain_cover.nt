@@ -1,27 +1,27 @@
-test_find_covering_assemblies:
+test_find_assembly_subchain_cover:
   -
     id: one-to-one-1-1
-    assembly_subchain_pairs:
+    assembly_subchain:
       - 1 A
     expected:
       - 1
   -
     id: one-to-one-1-2
-    assembly_subchain_pairs:
+    assembly_subchain:
       - 1 A
       - 1 B
     expected:
       - 1
   -
     id: one-to-one-2-2
-    assembly_subchain_pairs:
+    assembly_subchain:
       - 1 A
       - 2 B
     expected:
       - 1 2
   -
     id: ambiguous-2-1
-    assembly_subchain_pairs:
+    assembly_subchain:
       - 1 A
       - 2 A
     expected:
@@ -29,7 +29,7 @@ test_find_covering_assemblies:
       - 2
   -
     id: min-cover-2-2
-    assembly_subchain_pairs:
+    assembly_subchain:
       - 1 A
       - 1 B
       - 2 B
@@ -37,7 +37,7 @@ test_find_covering_assemblies:
       - 1
   -
     id: min-cover-3-2
-    assembly_subchain_pairs:
+    assembly_subchain:
       - 1 A
       - 2 B
       - 3 A
