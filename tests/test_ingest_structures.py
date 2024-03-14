@@ -838,6 +838,107 @@ def test_ingest_mmcif_5i1r():
 
     assert mmc.select_em_quality(db).is_empty()
 
+def test_ingest_mmcif_6igg():
+    # 6igg has an assembly that uses all the subchains twice, with two 
+    # different matrices.  This triggered a bug in my code where duplicate 
+    # entries would appear in the assembly/subchain link table.
+
+    db = mmc.open_db(':memory:')
+    mmc.init_db(db)
+
+    mmc.ingest_structures(db, [CIF_DIR / '6igg.cif.gz'])
+
+    assert mmc.select_structures(db).to_dicts() == [
+            dict(
+                id=1,
+                pdb_id='6igg',
+                exptl_methods=['X-RAY DIFFRACTION'],
+                deposit_date=date(year=2018, month=9, day=25),
+                full_atom=True,
+                rank=None,
+            ),
+    ]
+    assert mmc.select_models(db).to_dicts() == [
+            dict(id=1,  struct_id=1, pdb_id='1'),
+    ]
+    assert mmc.select_chains(db).to_dicts() == [
+            dict(id=1, struct_id=1, pdb_id='A'),
+    ]
+    assert mmc.select_entities(db).to_dicts() == [
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='polymer',
+                formula_weight_Da=approx(19433.9),
+            ),
+            dict(
+                id=2,
+                struct_id=1,
+                pdb_id='2',
+                type='non-polymer',
+                formula_weight_Da=approx(62.068),
+            ),
+            dict(
+                id=3,
+                struct_id=1,
+                pdb_id='3',
+                type='water',
+                formula_weight_Da=approx(18.015),
+            ),
+    ]
+    assert mmc.select_polymer_entities(db).to_dicts() == [
+            dict(
+                entity_id=1,
+                type='polypeptide(L)',
+                sequence='ISHMSINIRDPLIVSRVVGDVLDPFNRSITLKVTYGQREVTNGLDLRPSQVQNKPRVEIGGEDLRNFYTLVMVDPDVPSPSNPHLREYLHWLVTDIPATTGTTFGNEIVSYENPSPTAGIHRVVFILFRQLGRQTVYAPGWRQNFNTREFAEIYNLGLPVAAVFYNSQRES',
+            ),
+    ]
+    assert mmc.select_branched_entities(db).is_empty()
+    assert mmc.select_branched_entity_bonds(db).is_empty()
+    assert mmc.select_monomer_entities(db).to_dicts() == [
+            dict(entity_id=2, pdb_comp_id='EDO'),
+            dict(entity_id=3, pdb_comp_id='HOH'),
+    ]
+    assert mmc.select_subchains(db).to_dicts() == [
+            dict(id=1,  chain_id=1, entity_id=1, pdb_id='A'),
+            dict(id=2,  chain_id=1, entity_id=2, pdb_id='B'),
+            dict(id=3,  chain_id=1, entity_id=2, pdb_id='C'),
+            dict(id=4,  chain_id=1, entity_id=2, pdb_id='D'),
+            dict(id=5,  chain_id=1, entity_id=2, pdb_id='E'),
+            dict(id=6,  chain_id=1, entity_id=2, pdb_id='F'),
+            dict(id=7,  chain_id=1, entity_id=2, pdb_id='G'),
+            dict(id=8,  chain_id=1, entity_id=2, pdb_id='H'),
+            dict(id=9,  chain_id=1, entity_id=2, pdb_id='I'),
+            dict(id=10, chain_id=1, entity_id=3, pdb_id='J'),
+    ]
+    assert mmc.select_assemblies(db).to_dicts() == [
+            dict(id=1, struct_id=1, pdb_id='1'),
+    ]
+    assert mmc.select_assembly_subchains(db).to_dicts() == [
+            dict(assembly_id=1, subchain_id=1),
+            dict(assembly_id=1, subchain_id=2),
+            dict(assembly_id=1, subchain_id=3),
+            dict(assembly_id=1, subchain_id=4),
+            dict(assembly_id=1, subchain_id=5),
+            dict(assembly_id=1, subchain_id=6),
+            dict(assembly_id=1, subchain_id=7),
+            dict(assembly_id=1, subchain_id=8),
+            dict(assembly_id=1, subchain_id=9),
+            dict(assembly_id=1, subchain_id=10),
+    ]
+    assert mmc.select_xtal_quality(db).to_dicts() == [
+            dict(
+                struct_id=1,
+                source='mmcif_pdbx',
+                resolution_A=approx(1.00),
+                r_work=approx(0.1163),
+                r_free=approx(0.1356),
+            ),
+    ]
+    assert mmc.select_nmr_representatives(db).is_empty()
+    assert mmc.select_em_quality(db).is_empty()
+
 def test_find_subchains():
     from macromol_census.ingest_structures import _find_subchains
 

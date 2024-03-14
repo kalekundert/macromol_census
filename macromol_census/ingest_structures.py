@@ -16,15 +16,6 @@ Options:
         been ingested (possibly on a more powerful computer).
 """
 
-# TODO:
-# - Find structures with all subchains
-# - Find chain/subchain/entity relationships for those structures
-# - Group structures by consistency
-# - Keep largest group
-# - Record chain/subchain/entity relationships, and consistent structures
-#
-# - Test on 
-
 import polars as pl
 
 from .database_io import (
@@ -154,7 +145,7 @@ def _extract_models_subchains_assemblies(cif):
                 atom_site
                 .select(
                     pl.lit('1').alias('assembly_id'),
-                    pl.col('label_asym_id').unique().alias('subchain_id'),
+                    pl.col('label_asym_id').unique(maintain_order=True).alias('subchain_id'),
                 )
         )
     else:
@@ -164,6 +155,8 @@ def _extract_models_subchains_assemblies(cif):
                     'assembly_id',
                     subchain_id=pl.col('asym_id_list').str.split(','),
                 )
+                .group_by('assembly_id', maintain_order=True)
+                .agg(pl.col('subchain_id').flatten().unique(maintain_order=True))
                 .explode('subchain_id')
         )
 
