@@ -132,33 +132,41 @@ def pick_assemblies(db):
         ''')
 
 def _select_relevant_subchains(db):
-    df = db.sql('''\
+    entity_cluster_some = db.sql('''\
             SELECT 
-                subchain.id AS subchain_id,
+                entity.id AS entity_id,
                 entity_cluster.cluster_id AS cluster_id
-            FROM subchain
-            JOIN entity ON (entity.id = subchain.entity_id)
-            LEFT JOIN entity_cluster USING (entity_id)
-            ANTI JOIN entity_ignore USING (entity_id)
+            FROM entity
+            LEFT JOIN entity_cluster ON entity.id = entity_cluster.entity_id
     ''').pl()
 
-    # Null cluster ids mean the subchain isn't part of any cluster.  We want 
-    # subchains in different clusters to have different cluster id numbers, so 
-    # we need to replace null values with unique ids.
 
-    next_cluster_id = df['cluster_id'].max() + 1
+    # Entities that have null cluster ids are in their own clusters (or in 
+    # other words, aren't clustered with anything).  We want entities in 
+    # different clusters to have different cluster id numbers, so we need to 
+    # replace null values with unique ids.
 
-    return (
-            df
-            .sort('subchain_id')
+    singleton_cluster_start = entity_cluster_some['cluster_id'].max() + 1
+
+    entity_cluster_all = (
+            entity_cluster_some
             .with_columns(
                 cluster_id=pl.coalesce(
                     'cluster_id',
-                    pl.lit(next_cluster_id)
+                    pl.lit(singleton_cluster_start)
                     + pl.int_range(pl.len()).over('cluster_id')
                 )
             )
     )
+
+    return db.sql('''\
+            SELECT 
+                subchain.id AS subchain_id,
+                entity_cluster_all.cluster_id AS cluster_id
+            FROM subchain
+            JOIN entity_cluster_all USING (entity_id)
+            ANTI JOIN entity_ignore USING (entity_id)
+    ''').pl()
 
 def _select_relevant_assemblies(db, subchain_cluster):
     assembly_cluster = db.sql('''\

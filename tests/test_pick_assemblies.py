@@ -192,10 +192,11 @@ def test_select_relevant_subchains():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
-    # Create a structure that has the following properties:
+    # Create a structure with the following:
     # - ignored entity
     # - entities that cluster together
     # - entities that aren't in any cluster
+    # - same entity appears in multiple subchains
 
     mmc.insert_structure(
             db, '1xyz',
@@ -209,13 +210,15 @@ def test_select_relevant_subchains():
                 dict(assembly_id='1', subchain_id='C'),
                 dict(assembly_id='1', subchain_id='D'),
                 dict(assembly_id='1', subchain_id='E'),
+                dict(assembly_id='1', subchain_id='F'),
             ]),
             subchains=pl.DataFrame([
                 dict(id='A', chain_id='A', entity_id='1'),
                 dict(id='B', chain_id='B', entity_id='2'),
                 dict(id='C', chain_id='C', entity_id='3'),
                 dict(id='D', chain_id='A', entity_id='4'),
-                dict(id='E', chain_id='A', entity_id='5'),
+                dict(id='E', chain_id='B', entity_id='5'),
+                dict(id='F', chain_id='C', entity_id='5'),
             ]),
             entities=pl.DataFrame([
                 dict(id='1', type='polymer', formula_weight_Da=None),
@@ -248,7 +251,8 @@ def test_select_relevant_subchains():
             dict(subchain_id=1, cluster_id=1),
             dict(subchain_id=2, cluster_id=1),
             dict(subchain_id=3, cluster_id=2),
-            dict(subchain_id=5, cluster_id=3),
+            dict(subchain_id=5, cluster_id=4),
+            dict(subchain_id=6, cluster_id=4),
     ]
     
 def test_select_relevant_assemblies():
