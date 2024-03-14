@@ -76,14 +76,16 @@ def pick_assemblies(db):
             SELECT
                 structure.rank AS rank,
                 assembly.id AS assembly_id,
-                relevant_subchains.subchain_id AS subchain_id,
+                subchain.chain_id AS chain_id,
+                subchain.id AS subchain_id,
                 relevant_subchains.cluster_id AS cluster_id
             FROM relevant_assemblies
             JOIN assembly ON assembly.id = relevant_assemblies.assembly_id
             JOIN assembly_subchain USING (assembly_id)
-            JOIN relevant_subchains USING (subchain_id)
             JOIN structure ON structure.id = assembly.struct_id
-            ORDER BY rank, assembly_id, subchain_id
+            JOIN subchain ON subchain.id = assembly_subchain.subchain_id
+            JOIN relevant_subchains USING (subchain_id)
+            ORDER BY rank, assembly_id, chain_id, subchain_id
     ''').pl()
     n = assembly_subchains.n_unique('assembly_id')
 
@@ -146,7 +148,7 @@ def _select_relevant_subchains(db):
     # different clusters to have different cluster id numbers, so we need to 
     # replace null values with unique ids.
 
-    singleton_cluster_start = entity_cluster_some['cluster_id'].max() + 1
+    singleton_cluster_start = (entity_cluster_some['cluster_id'].max() or 0) + 1
 
     entity_cluster_all = (
             entity_cluster_some
