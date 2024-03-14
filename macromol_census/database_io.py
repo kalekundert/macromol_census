@@ -37,7 +37,7 @@ def init_db(db):
             CREATE SEQUENCE IF NOT EXISTS structure_id;
             CREATE TABLE IF NOT EXISTS structure (
                 id INT DEFAULT nextval('structure_id') PRIMARY KEY,
-                pdb_id STRING NOT NULL,
+                pdb_id STRING NOT NULL UNIQUE,
                 exptl_methods EXPTL_METHOD[],
                 deposit_date DATE,
                 full_atom BOOLEAN NOT NULL,
