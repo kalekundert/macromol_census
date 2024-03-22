@@ -10,7 +10,7 @@ Arguments:
 """
 
 import polars as pl
-from .database_io import open_db, select_assemblies, select_assembly_subchains
+from .database_io import open_db, transaction
 from itertools import combinations
 from tqdm import tqdm
 
@@ -20,7 +20,8 @@ def main():
     args = docopt.docopt(__doc__)
     db = open_db(args['<in:db>'])
 
-    pick_assemblies(db)
+    with transaction(db):
+        pick_assemblies(db)
 
 def pick_assemblies(db):
     # KBK: Below is an outline of the original algorithm I planned.  The final 
@@ -69,6 +70,8 @@ def pick_assemblies(db):
 
     included_clusters = set()
     included_cluster_pairs = set()
+    nonredundant = []
+    nonredundant_pairs = []
 
     relevant_subchains = _select_relevant_subchains(db)
     relevant_assemblies = _select_relevant_assemblies(db, relevant_subchains)
@@ -98,9 +101,6 @@ def pick_assemblies(db):
             assembly_subchains.group_by(['assembly_id'], maintain_order=True),
             total=n,
     ):
-        nonredundant = []
-        nonredundant_pairs = []
-
         subchains_i = assembly_i.select('subchain_id', 'cluster_id')
 
         for subchain_id, cluster_id in subchains_i.iter_rows():
@@ -115,23 +115,23 @@ def pick_assemblies(db):
                 included_cluster_pairs.add(pair)
                 nonredundant_pairs.append(sorted([subchain_j, subchain_k]))
 
-        nonredundant_df = pl.DataFrame(
-                nonredundant,
-                schema=['subchain_id'],
-        )
-        nonredundant_pairs_df = pl.DataFrame(
-                nonredundant_pairs,
-                schema=['subchain_id_1', 'subchain_id_2'],
-                orient='row',
-        )
+    nonredundant_df = pl.DataFrame(
+            nonredundant,
+            schema=['subchain_id'],
+    )
+    nonredundant_pairs_df = pl.DataFrame(
+            nonredundant_pairs,
+            schema=['subchain_id_1', 'subchain_id_2'],
+            orient='row',
+    )
 
-        db.sql('''\
-                INSERT INTO nonredundant (subchain_id)
-                SELECT subchain_id FROM nonredundant_df;
+    db.sql('''\
+            INSERT INTO nonredundant (subchain_id)
+            SELECT subchain_id FROM nonredundant_df;
 
-                INSERT INTO nonredundant_pair (subchain_id_1, subchain_id_2)
-                SELECT subchain_id_1, subchain_id_2 FROM nonredundant_pairs_df;
-        ''')
+            INSERT INTO nonredundant_pair (subchain_id_1, subchain_id_2)
+            SELECT subchain_id_1, subchain_id_2 FROM nonredundant_pairs_df;
+    ''')
 
 def _select_relevant_subchains(db):
     entity_cluster_some = db.sql('''\
