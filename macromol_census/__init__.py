@@ -17,6 +17,7 @@ from .rank_structures import *
 from .find_assembly_subchain_cover import *
 from .find_identical_branched_entities import *
 from .extract_fasta import *
+from .extract_nonredundant_assemblies import *
 from .util import *
 from .error import *
 

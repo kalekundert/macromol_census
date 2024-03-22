@@ -52,8 +52,9 @@ mmc_rank_structures = "macromol_census.rank_structures:main"
 mmc_find_assembly_subchain_cover = "macromol_census.find_assembly_subchain_cover:main"
 mmc_find_identical_ligands = "macromol_census.find_identical_ligands:main"
 mmc_find_identical_branched_entities = "macromol_census.find_identical_branched_entities:main"
-mmc_extract_fasta = "macromol_census.extract_fasta:main"
 mmc_pick_assemblies = "macromol_census.pick_assemblies:main"
+mmc_extract_fasta = "macromol_census.extract_fasta:main"
+mmc_extract_nonredundant_assemblies = "macromol_census.extract_nonredundant_assemblies:main"
 
 [project.urls]
 'Documentation' = 'https://macromol-census.readthedocs.io/en/latest/'
