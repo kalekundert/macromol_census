@@ -259,7 +259,6 @@ def test_pick_assemblies_chain():
             dict(subchain_id_1=3, subchain_id_2=4),
     ])
 
-
 def test_select_relevant_subchains():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
@@ -331,8 +330,11 @@ def test_select_relevant_assemblies():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
-    # This structure has redundant assemblies (1 has the same subchains as 2 
-    # and 3 together).  Only the first will be considered "relevant".
+    # Subchain cover
+    # ==============
+    # `1abc` has redundant assemblies (1 has the same subchains as 2 and 3 
+    # together).  Only the first will be part of the "subchain cover", 
+    # therefore only the first will be considered "relevant".
 
     struct_id_1 = mmc.insert_structure(
             db, '1abc',
@@ -358,9 +360,9 @@ def test_select_relevant_assemblies():
             ]),
     )
 
-    # These two structure are both irrelevant.  The first is blacklisted, and 
-    # the second has a subchain in the same cluster as a subchain from the 
-    # blacklisted structure.
+    # Structure blacklist
+    # ===================
+    # `2abc` is irrelevant because it will be placed on the "blacklist":
     
     struct_id_2 = mmc.insert_structure(
             db, '2abc',
@@ -386,6 +388,8 @@ def test_select_relevant_assemblies():
             ]),
     )
 
+    # `3abc` is irrelevant because it has a subchain that belongs to the same 
+    # cluster as a subchain from `2abc`, which is blacklisted.
     struct_id_3 = mmc.insert_structure(
             db, '3abc',
             exptl_methods=[],
@@ -438,8 +442,188 @@ def test_select_relevant_assemblies():
     subchains = _mmc._select_relevant_subchains(db)
     assemblies = _mmc._select_relevant_assemblies(db, subchains)
 
-    print(assemblies)
+    assert assemblies.to_dicts() == [
+            dict(assembly_id=1),
+    ]
+
+def test_select_relevant_assemblies_resolution():
+    # I decided to separate out the tests for the low resolution structures 
+    # from all the other assembly-filtering criteria.  There are a lot of cases 
+    # to consider here, and I didn't want to make the other test too confusing.
+
+    db = mmc.open_db(':memory:')
+    mmc.init_db(db)
+
+    # `1abc` is relevant because its crystallography resolution is high enough.
+    mmc.insert_structure(
+            db, '1abc',
+            exptl_methods=[],
+            deposit_date=None,
+            full_atom=True,
+
+            assembly_subchains=pl.DataFrame([
+                dict(assembly_id='1', subchain_id='A'),
+            ]),
+            subchains=pl.DataFrame([
+                dict(id='A', chain_id='A', entity_id='1'),
+            ]),
+            entities=pl.DataFrame([
+                dict(id='1', type='polymer', formula_weight_Da=None),
+            ]),
+            polymer_entities=pl.DataFrame([
+                dict(entity_id='1', type='polypeptide(L)', sequence='XXX...'),
+            ]),
+            xtal_quality=pl.DataFrame([
+                dict(resolution_A=9.9, r_work=None, r_free=None),
+            ]),
+    )
+
+    # `2abc` is irrelevant because its crystallography resolution is too low. 
+    mmc.insert_structure(
+            db, '2abc',
+            exptl_methods=[],
+            deposit_date=None,
+            full_atom=True,
+
+            assembly_subchains=pl.DataFrame([
+                dict(assembly_id='1', subchain_id='A'),
+            ]),
+            subchains=pl.DataFrame([
+                dict(id='A', chain_id='A', entity_id='1'),
+            ]),
+            entities=pl.DataFrame([
+                dict(id='1', type='polymer', formula_weight_Da=None),
+            ]),
+            polymer_entities=pl.DataFrame([
+                dict(entity_id='1', type='polypeptide(L)', sequence='XXX...'),
+            ]),
+            xtal_quality=pl.DataFrame([
+                dict(resolution_A=10, r_work=None, r_free=None),
+            ]),
+    )
+
+    # `3abc` is irrelevant because its EM resolution is too low. 
+    mmc.insert_structure(
+            db, '3abc',
+            exptl_methods=[],
+            deposit_date=None,
+            full_atom=True,
+
+            assembly_subchains=pl.DataFrame([
+                dict(assembly_id='1', subchain_id='A'),
+            ]),
+            subchains=pl.DataFrame([
+                dict(id='A', chain_id='A', entity_id='1'),
+            ]),
+            entities=pl.DataFrame([
+                dict(id='1', type='polymer', formula_weight_Da=None),
+            ]),
+            polymer_entities=pl.DataFrame([
+                dict(entity_id='1', type='polypeptide(L)', sequence='FXXX...'),
+            ]),
+            em_quality=pl.DataFrame([
+                dict(resolution_A=10),
+            ]),
+    )
+
+    # `4abc` is relevant because one of its crystallography resolutions is high 
+    # enough, even though others are too low.
+    mmc.insert_structure(
+            db, '4abc',
+            exptl_methods=[],
+            deposit_date=None,
+            full_atom=True,
+
+            assembly_subchains=pl.DataFrame([
+                dict(assembly_id='1', subchain_id='A'),
+            ]),
+            subchains=pl.DataFrame([
+                dict(id='A', chain_id='A', entity_id='1'),
+            ]),
+            entities=pl.DataFrame([
+                dict(id='1', type='polymer', formula_weight_Da=None),
+            ]),
+            polymer_entities=pl.DataFrame([
+                dict(entity_id='1', type='polypeptide(L)', sequence='FXXX...'),
+            ]),
+            xtal_quality=pl.DataFrame([
+                dict(resolution_A=10, r_work=None, r_free=None),
+                dict(resolution_A=4, r_work=None, r_free=None),
+            ]),
+            em_quality=pl.DataFrame([
+                dict(resolution_A=10),
+            ]),
+    )
+
+    # `5abc` is relevant because one of its EM resolutions is high enough, even 
+    # though others are too low.
+    mmc.insert_structure(
+            db, '5abc',
+            exptl_methods=[],
+            deposit_date=None,
+            full_atom=True,
+
+            assembly_subchains=pl.DataFrame([
+                dict(assembly_id='1', subchain_id='A'),
+            ]),
+            subchains=pl.DataFrame([
+                dict(id='A', chain_id='A', entity_id='1'),
+            ]),
+            entities=pl.DataFrame([
+                dict(id='1', type='polymer', formula_weight_Da=None),
+            ]),
+            polymer_entities=pl.DataFrame([
+                dict(entity_id='1', type='polypeptide(L)', sequence='FXXX...'),
+            ]),
+            xtal_quality=pl.DataFrame([
+                dict(resolution_A=10, r_work=None, r_free=None),
+            ]),
+            em_quality=pl.DataFrame([
+                dict(resolution_A=10),
+                dict(resolution_A=4),
+            ]),
+    )
+
+    # `6abc` is relevant because it doesn't have a resolution (e.g. it's an NMR 
+    # structure).
+    mmc.insert_structure(
+            db, '6abc',
+            exptl_methods=[],
+            deposit_date=None,
+            full_atom=True,
+
+            assembly_subchains=pl.DataFrame([
+                dict(assembly_id='1', subchain_id='A'),
+            ]),
+            subchains=pl.DataFrame([
+                dict(id='A', chain_id='A', entity_id='1'),
+            ]),
+            entities=pl.DataFrame([
+                dict(id='1', type='polymer', formula_weight_Da=None),
+            ]),
+            polymer_entities=pl.DataFrame([
+                dict(entity_id='1', type='polypeptide(L)', sequence='FXXX...'),
+            ]),
+    )
+
+    mmc.insert_assembly_subchain_cover(
+            db,
+            pl.DataFrame([
+                dict(assembly_id=1),
+                dict(assembly_id=2),
+                dict(assembly_id=3),
+                dict(assembly_id=4),
+                dict(assembly_id=5),
+                dict(assembly_id=6),
+            ]),
+    )
+
+    subchains = _mmc._select_relevant_subchains(db)
+    assemblies = _mmc._select_relevant_assemblies(db, subchains)
 
     assert assemblies.to_dicts() == [
             dict(assembly_id=1),
+            dict(assembly_id=4),
+            dict(assembly_id=5),
+            dict(assembly_id=6),
     ]

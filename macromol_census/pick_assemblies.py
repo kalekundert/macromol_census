@@ -68,11 +68,6 @@ def pick_assemblies(db):
     #     chains/chain pairs.
     #   - Advance to next highest "quality" assembly.
 
-    included_clusters = set()
-    included_cluster_pairs = set()
-    nonredundant = []
-    nonredundant_pairs = []
-
     relevant_subchains = _select_relevant_subchains(db)
     relevant_assemblies = _select_relevant_assemblies(db, relevant_subchains)
     assembly_subchains = db.sql('''\
@@ -96,6 +91,11 @@ def pick_assemblies(db):
     # it at least makes it possible for that to happen.
     del relevant_subchains
     del relevant_assemblies
+
+    included_clusters = set()
+    included_cluster_pairs = set()
+    nonredundant = []
+    nonredundant_pairs = []
 
     for _, assembly_i in tqdm(
             assembly_subchains.group_by(['assembly_id'], maintain_order=True),
@@ -134,6 +134,26 @@ def pick_assemblies(db):
     ''')
 
 def _select_relevant_subchains(db):
+    """
+    Return all of the subchains eligible to include in the dataset, along with 
+    the cluster that each belongs to.
+
+    Returns:
+        A dataframe with two columns:
+
+        - ``subchain_id``: A reference to the ``id`` column of the ``subchain`` 
+          table.  Subchains that should be excluded from the final dataset 
+          (e.g. non-specific ligands) will be excluded from this dataframe.  
+          Generally speaking, though, this dataframe will contain most of the 
+          subchains provided by the user.  Note that not all of the subchains 
+          returned here will necessarily end up in the final dataset; there are 
+          subsequent filtering steps.  But any subchains not returned here will 
+          not be in the final dataset.
+
+        - ``cluster_id``: The id number of the cluster that this subchain 
+          belongs to.  Clusters are determined by the entity the subchain 
+          represents.  This column will not have any null values.
+    """
     entity_cluster_some = db.sql('''\
             SELECT 
                 entity.id AS entity_id,
@@ -141,7 +161,6 @@ def _select_relevant_subchains(db):
             FROM entity
             LEFT JOIN entity_cluster ON entity.id = entity_cluster.entity_id
     ''').pl()
-
 
     # Entities that have null cluster ids are in their own clusters (or in 
     # other words, aren't clustered with anything).  We want entities in 
@@ -171,6 +190,31 @@ def _select_relevant_subchains(db):
     ''').pl()
 
 def _select_relevant_assemblies(db, subchain_cluster):
+    """
+    Return all of the assemblies eligible to include in the dataset.
+
+    Returns:
+        A dataframe with one column:
+
+        - `assembly_id``: A reference to the ``id`` column of the ``assembly`` 
+          table.
+
+    An assembly is deemed eligible to include in the dataset if:
+
+    - It does not appear in a blacklisted structure.
+    - It does not share a subchain cluster with any blacklisted assemblies.
+    - It is part of the "assembly cover", i.e. the minimal set of assemblies 
+      needed to include every subchain.
+    - It has a resolution below 10Å.  Assemblies that don't have a resolution 
+      at all (e.g. from NMR structures) are not excluded by this criterion.  If 
+      the assembly has multiple resolutions, only the lowest is considered.
+
+    Not all of the assemblies returned by 
+    this function will necessarily end up in the final dataset.  They 
+    have not yet been filtered for redundancy.  However, any assemblies 
+    not returned by this function will not be included in the final 
+    dataset.
+    """
     assembly_cluster = db.sql('''\
             SELECT
                 assembly_subchain.assembly_id AS assembly_id,
@@ -194,10 +238,28 @@ def _select_relevant_assemblies(db, subchain_cluster):
             JOIN assembly_cluster USING (cluster_id)
     ''')
 
+    assembly_low_res = db.sql('''\
+            SELECT *
+            FROM (
+                SELECT
+                    assembly.id AS assembly_id,
+                    least(
+                        min(quality_xtal.resolution_A),
+                        min(quality_em.resolution_A)
+                    ) AS resolution_A
+                FROM assembly
+                LEFT JOIN quality_xtal USING (struct_id)
+                LEFT JOIN quality_em USING (struct_id)
+                GROUP BY assembly.id
+            )
+            WHERE resolution_A >= 10
+    ''')
+
     return db.sql('''\
             SELECT
                 assembly_subchain_cover.assembly_id AS assembly_id
             FROM assembly_subchain_cover
             ANTI JOIN assembly_blacklist USING (assembly_id)
+            ANTI JOIN assembly_low_res USING (assembly_id)
     ''').pl()
 
