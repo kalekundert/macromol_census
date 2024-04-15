@@ -70,3 +70,21 @@ def extract_dataframe(
             .filter(~pl.all_horizontal(pl.all().is_null()))
     )
 
+class tquiet:
+    """
+    Mimic the `tqdm` progress bar interface, but don't actually display 
+    anything.
+
+    This class is meant to be a default argument for functions with long 
+    running loops.  This allows the main function to remain in complete control 
+    of terminal output.
+    """
+
+    def __init__(self, iterable=None, total=None):
+        self.iterable = iterable
+
+    def __iter__(self):
+        yield from self.iterable
+
+    def update(self, n=1):
+        pass
