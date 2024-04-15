@@ -5,7 +5,7 @@ from gemmi.cif import read as read_cif
 from pytest import approx
 from pathlib import Path
 
-CIF_DIR = Path(__file__).parent / 'structures'
+CIF_DIR = Path(__file__).parent / 'pdb'
 
 def test_extract_nmr_6dze():
     cif = read_cif(str(CIF_DIR / '6dze_validation.cif.gz')).sole_block()

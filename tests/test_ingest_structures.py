@@ -8,7 +8,7 @@ from functools import partial
 from pathlib import Path
 from datetime import date
 
-CIF_DIR = Path(__file__).parent / 'structures'
+CIF_DIR = Path(__file__).parent / 'pdb'
 
 assert_frame_equal = partial(assert_frame_equal, check_dtype=False)
 

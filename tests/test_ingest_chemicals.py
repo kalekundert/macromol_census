@@ -1,11 +1,14 @@
 import macromol_census as mmc
 from gemmi.cif import read as read_cif
+from pathlib import Path
+
+CIF_DIR = Path(__file__).parent / 'pdb'
 
 def test_ingest_chemicals():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
-    cif = read_cif('structures/components.cif.gz')
+    cif = read_cif(str(CIF_DIR / 'components.cif.gz'))
     mmc.ingest_chemical_components(db, cif)
 
     assert mmc.select_chemical_components(db).to_dicts() == [
