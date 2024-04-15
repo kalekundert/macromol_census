@@ -1,6 +1,5 @@
 import polars as pl
 import macromol_census as mmc
-import parametrize_from_file as pff
 
 from pytest import approx
 from pytest_unordered import unordered

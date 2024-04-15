@@ -1,7 +1,5 @@
 import macromol_census as mmc
-
 from gemmi.cif import read as read_cif
-from pathlib import Path
 
 def test_ingest_chemicals():
     db = mmc.open_db(':memory:')

@@ -1,6 +1,5 @@
 import macromol_census as mmc
 import polars as pl
-import pytest
 
 from polars.testing import assert_frame_equal
 from pytest import approx

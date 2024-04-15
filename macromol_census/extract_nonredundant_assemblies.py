@@ -13,10 +13,8 @@ Arguments:
         form.
 """
 
-import polars as pl
 import json, sys
-
-from .database_io import open_db, update_structure_ranks
+from .database_io import open_db
 
 def main():
     import docopt

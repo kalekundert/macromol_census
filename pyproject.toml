@@ -63,12 +63,20 @@ mmc_extract_nonredundant_assemblies = "macromol_census.extract_nonredundant_asse
 'Continuous Integration' = 'https://github.com/kalekundert/macromol_census/actions'
 'Test Coverage' = 'https://coveralls.io/github/kalekundert/macromol_census'
 
-[tool.ruff]
+[tool.ruff.lint]
 select = ["F"]
-ignore = ["F405", "F403"]
+ignore = [
+    "F405",
+    "F403",
 
-[tool.ruff.per-file-ignores]
-"__init__.py" = ["F401"]
+    # This is the "local variable unused" error.  It generates a lot of false 
+    # positives in this code base, because of the way duckdb parses variable 
+    # names from strings.
+    "F841",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F821"]
 
 [tool.pytest.ini_options]
 addopts = "--doctest-modules --doctest-glob='*.rst'"
