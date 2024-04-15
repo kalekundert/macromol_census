@@ -24,7 +24,7 @@ dependencies = [
   'more_itertools',
   'networkx',
   'numpy',
-  #'polars',
+  'polars',
   'scipy',
   'tidyexc',
   'tqdm',
