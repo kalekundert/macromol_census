@@ -20,6 +20,9 @@ def test_pick_assemblies():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -46,6 +49,9 @@ def test_pick_assemblies():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -68,6 +74,9 @@ def test_pick_assemblies():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -95,6 +104,9 @@ def test_pick_assemblies():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -113,14 +125,17 @@ def test_pick_assemblies():
             ]),
     )
 
-    # The fifth assembly has two copies of a subchain that has appeared 
-    # previously.  This still counts as a unique pair.
+    # The fifth assembly has two copies of the same subchain, which has 
+    # appeared previously.  This still counts as a unique pair.
     mmc.insert_structure(
             db, '5abc',
             exptl_methods=[],
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -219,6 +234,9 @@ def test_pick_assemblies_chain():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -281,6 +299,9 @@ def test_visit_assemblies_memento(tmp_path):
             models=pl.DataFrame([
                 dict(id='1'),
             ]),
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -307,6 +328,10 @@ def test_visit_assemblies_memento(tmp_path):
             models=pl.DataFrame([
                 dict(id='1'),
             ]),
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+                dict(id='2', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='2', subchain_id='B'),
@@ -331,6 +356,9 @@ def test_visit_assemblies_memento(tmp_path):
             models=pl.DataFrame([
                 dict(id='1'),
                 dict(id='2'),
+            ]),
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
             ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
@@ -444,6 +472,9 @@ def test_select_relevant_subchains():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=3),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -511,6 +542,11 @@ def test_select_relevant_assemblies():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+                dict(id='2', type=None, polymer_count=1),
+                dict(id='3', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -539,6 +575,9 @@ def test_select_relevant_assemblies():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -565,6 +604,9 @@ def test_select_relevant_assemblies():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=2),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),
@@ -630,6 +672,9 @@ def test_select_relevant_assemblies_resolution():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -654,6 +699,9 @@ def test_select_relevant_assemblies_resolution():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -678,6 +726,9 @@ def test_select_relevant_assemblies_resolution():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -703,6 +754,9 @@ def test_select_relevant_assemblies_resolution():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -732,6 +786,9 @@ def test_select_relevant_assemblies_resolution():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -761,6 +818,9 @@ def test_select_relevant_assemblies_resolution():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -810,6 +870,10 @@ def test_select_assembly_rank():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+                dict(id='2', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='2', subchain_id='B'),
@@ -836,6 +900,10 @@ def test_select_assembly_rank():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+                dict(id='2', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='2', subchain_id='B'),

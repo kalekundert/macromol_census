@@ -90,7 +90,7 @@ def _get_insert_structure_kwargs(cif_path):
     cif = read_cif(cif_path)
     pdb_id = cif.name.lower()
 
-    models, subchains, assembly_subchains, full_atom = \
+    models, assemblies, subchains, assembly_subchains, full_atom = \
             _extract_models_subchains_assemblies(cif)
 
     return dict(
@@ -100,9 +100,10 @@ def _get_insert_structure_kwargs(cif_path):
             full_atom=full_atom,
 
             models=models,
-            assembly_subchains=assembly_subchains,
+            assemblies=assemblies,
             subchains=subchains,
             entities=_extract_entities(cif),
+            assembly_subchains=assembly_subchains,
 
             polymer_entities=_extract_polymer_entities(cif),
             branched_entities=_extract_branched_entities(cif),
@@ -132,6 +133,14 @@ def _extract_models_subchains_assemblies(cif):
                 'pdbx_PDB_model_num',
             ],
     )
+    struct_assembly = extract_dataframe(
+            cif, 'pdbx_struct_assembly',
+            required_cols=[
+                'id',
+                'details',
+                'oligomeric_count',
+            ],
+    )
     struct_assembly_gen = extract_dataframe(
             cif, 'pdbx_struct_assembly_gen',
             required_cols=[
@@ -140,15 +149,25 @@ def _extract_models_subchains_assemblies(cif):
             ],
     )
 
+    assemblies = (
+            struct_assembly
+            .select(
+                pl.col('id'),
+                pl.col('details').alias('type'),
+                pl.col('oligomeric_count').cast(int).alias('polymer_count'),
+            )
+    )
+
     if struct_assembly_gen.is_empty():
         assembly_subchains = (
                 atom_site
                 .select(
-                    pl.lit('1').alias('assembly_id'),
+                    pl.lit(assemblies['id'].item()).alias('assembly_id'),
                     pl.col('label_asym_id').unique(maintain_order=True).alias('subchain_id'),
                 )
         )
     else:
+        assert set(struct_assembly['id']) == set(struct_assembly_gen['assembly_id'])
         assembly_subchains = (
                 struct_assembly_gen
                 .select(
@@ -186,10 +205,10 @@ def _extract_models_subchains_assemblies(cif):
         model_attrs[key] = subchains, assembly_subchains, full_atom
 
     # If there are models that have exactly the same subchains as the 
-    # biological assembly, prefer those.  Otherwise, consider models that have 
-    # more subchains than the biological assembly.  Note that either way, only 
-    # those subchains that are actually in the biological assembly will be 
-    # added to the database.
+    # biological assemblies, prefer those.  Otherwise, consider models that 
+    # have more subchains than the biological assemblies.  Note that either 
+    # way, only those subchains that are actually in a biological assembly will 
+    # be added to the database.
 
     if model_ids[True]:
         model_ids = model_ids[True]
@@ -205,6 +224,7 @@ def _extract_models_subchains_assemblies(cif):
 
     return (
             pl.DataFrame({'id': model_ids[best_key]}),
+            assemblies,
             *model_attrs[best_key],
     )
 

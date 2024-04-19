@@ -29,6 +29,9 @@ def test_ignore_low_weight_ligands():
             deposit_date=None,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=0),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
                 dict(assembly_id='1', subchain_id='B'),

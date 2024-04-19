@@ -16,6 +16,9 @@ def insert_1abc(db):
             deposit_date=date(year=2024, month=2, day=16),
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type='author_defined_assembly', polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
@@ -52,6 +55,10 @@ def insert_9xyz(db):
             models=pl.DataFrame([
                 dict(id='1'),
                 dict(id='2'),
+            ]),
+            assemblies=pl.DataFrame([
+                dict(id='1', type='author_defined_assembly', polymer_count=4),
+                dict(id='2', type='software_defined_assembly', polymer_count=2),
             ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
@@ -193,9 +200,27 @@ def test_insert_structure():
             dict(id=9, chain_id=5, entity_id=5, pdb_id='H'),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
-            dict(id=2, struct_id=2, pdb_id='1'),
-            dict(id=3, struct_id=2, pdb_id='2'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_defined_assembly',
+                polymer_count=1,
+            ),
+            dict(
+                id=2,
+                struct_id=2,
+                pdb_id='1',
+                type='author_defined_assembly',
+                polymer_count=4,
+            ),
+            dict(
+                id=3,
+                struct_id=2,
+                pdb_id='2',
+                type='software_defined_assembly',
+                polymer_count=2,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),

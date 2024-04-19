@@ -116,8 +116,20 @@ def test_ingest_mmcif_4erd():
             dict(id=9, pdb_id='I', entity_id=4, chain_id=4),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
-            dict(id=2, struct_id=1, pdb_id='2'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_defined_assembly',
+                polymer_count=3,
+            ),
+            dict(
+                id=2,
+                struct_id=1,
+                pdb_id='2',
+                type='author_defined_assembly',
+                polymer_count=3,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),
@@ -204,7 +216,13 @@ def test_ingest_mmcif_2g10():
             dict(id=5, chain_id=1, entity_id=5, pdb_id='E'),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_defined_assembly',
+                polymer_count=1,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),
@@ -312,11 +330,41 @@ def test_ingest_mmcif_4b09():
             dict(id=18, pdb_id='T', entity_id=2, chain_id=9),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
-            dict(id=2, struct_id=1, pdb_id='2'),
-            dict(id=3, struct_id=1, pdb_id='3'),
-            dict(id=4, struct_id=1, pdb_id='4'),
-            dict(id=5, struct_id=1, pdb_id='5'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_and_software_defined_assembly',
+                polymer_count=2, 
+            ),
+            dict(
+                id=2,
+                struct_id=1,
+                pdb_id='2',
+                type='author_and_software_defined_assembly',
+                polymer_count=2, 
+            ),
+            dict(
+                id=3,
+                struct_id=1,
+                pdb_id='3',
+                type='author_and_software_defined_assembly',
+                polymer_count=2, 
+            ),
+            dict(
+                id=4,
+                struct_id=1,
+                pdb_id='4',
+                type='author_and_software_defined_assembly',
+                polymer_count=2, 
+            ),
+            dict(
+                id=5,
+                struct_id=1,
+                pdb_id='5',
+                type='author_and_software_defined_assembly',
+                polymer_count=2, 
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == unordered([
             dict(assembly_id=1, subchain_id=1),
@@ -484,7 +532,13 @@ def test_ingest_mmcif_146d():
             dict(id=9, entity_id=5, chain_id=2, pdb_id='I'),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_defined_assembly',
+                polymer_count=2,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),
@@ -622,7 +676,13 @@ def test_ingest_mmcif_6wiv():
             dict(id=19, chain_id=2, entity_id=6, pdb_id='S'),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_defined_assembly',
+                polymer_count=2,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),
@@ -714,7 +774,13 @@ def test_ingest_mmcif_2iy3():
             dict(id=3, chain_id=3, entity_id=3, pdb_id='C'),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_and_software_defined_assembly',
+                polymer_count=3,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),
@@ -821,7 +887,13 @@ def test_ingest_mmcif_5i1r():
             dict(id=3, chain_id=1, entity_id=2, pdb_id='C'),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_and_software_defined_assembly',
+                polymer_count=1,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),
@@ -912,7 +984,13 @@ def test_ingest_mmcif_6igg():
             dict(id=10, chain_id=1, entity_id=3, pdb_id='J'),
     ]
     assert mmc.select_assemblies(db).to_dicts() == [
-            dict(id=1, struct_id=1, pdb_id='1'),
+            dict(
+                id=1,
+                struct_id=1,
+                pdb_id='1',
+                type='author_defined_assembly',
+                polymer_count=2,
+            ),
     ]
     assert mmc.select_assembly_subchains(db).to_dicts() == [
             dict(assembly_id=1, subchain_id=1),

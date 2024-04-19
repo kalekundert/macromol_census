@@ -205,6 +205,8 @@ def init_db(db):
                 id INT DEFAULT nextval('assembly_id') PRIMARY KEY,
                 struct_id INT NOT NULL,
                 pdb_id STRING NOT NULL,
+                type STRING,
+                polymer_count INT,
                 FOREIGN KEY(struct_id) REFERENCES structure(id)
             );
 
@@ -313,6 +315,7 @@ def insert_structure(
         deposit_date,
         full_atom,
         models=None,
+        assemblies,
         assembly_subchains,
         subchains,
         entities,
@@ -350,6 +353,7 @@ def insert_structure(
         return df.sort(cols).rename({x: f'pdb_{x}' for x in cols})
 
     models = label_pdb_ids(models, ['id'])
+    assemblies = label_pdb_ids(assemblies, ['id'])
     assembly_subchains = label_pdb_ids(
             assembly_subchains, ['assembly_id', 'subchain_id']
     )
@@ -366,15 +370,16 @@ def insert_structure(
     # the runtime cost is negligible, but I haven't benchmarked it.  Note that 
     # the `label_pdb_ids()` function above also sorts by id.
 
-    assemblies = (
-            assembly_subchains
-            .select(pdb_id=pl.col('pdb_assembly_id').unique().sort())
-    )
     chains = (
             subchains
             .select(pdb_id=pl.col('pdb_chain_id').unique().sort())
     )
 
+    assert not assemblies['pdb_id'].is_duplicated().any()
+    assert (
+            set(assemblies['pdb_id']) == 
+            set(assembly_subchains['pdb_assembly_id'])
+    )
     assert not subchains['pdb_id'].is_duplicated().any()
     assert (
             set(subchains['pdb_id']) == 
@@ -498,7 +503,12 @@ def _insert_models(db, struct_id, models):
     return _insert_pdb_ids(db, 'model', struct_id, models)
 
 def _insert_assemblies(db, struct_id, assemblies):
-    return _insert_pdb_ids(db, 'assembly', struct_id, assemblies)
+    return db.execute('''\
+            INSERT INTO assembly (struct_id, pdb_id, type, polymer_count)
+            SELECT ?, pdb_id, type, polymer_count FROM assemblies
+            RETURNING id AS assembly_id, pdb_id AS pdb_assembly_id''',
+            [struct_id],
+    ).pl()
 
 def _insert_assembly_subchains(db, assembly_subchains):
     db.execute('''\

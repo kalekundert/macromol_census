@@ -21,6 +21,9 @@ def insert_quality_metrics(
             deposit_date=deposit_date,
             full_atom=True,
 
+            assemblies=pl.DataFrame([
+                dict(id='1', type=None, polymer_count=1),
+            ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
             ]),
