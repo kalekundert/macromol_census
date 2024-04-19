@@ -256,7 +256,7 @@ def test_pick_assemblies_chain():
                 dict(id='2', type='non-polymer', formula_weight_Da=None),
             ]),
             polymer_entities=pl.DataFrame([
-                dict(entity_id='1', type='polypeptide(L)', sequence='XXXX...'),
+                dict(entity_id='1', type='polypeptide(L)', sequence=None),
             ]),
             monomer_entities=pl.DataFrame([
                 dict(entity_id='2', comp_id='ABC'),
@@ -402,25 +402,25 @@ def test_visit_assemblies_memento(tmp_path):
     )
 
     mmc.pick_assemblies(db)
+    iterations = 0
     visited_assemblies = []
     memento_path = tmp_path / 'memento.pkl'
 
     class MockVisitor(mmc.Visitor):
 
-        def __init__(self, interrupt_iteration):
-            self.iterations = 0
-            self.interrupt_iteration = interrupt_iteration
+        def __init__(self, structure):
+            assert '{' not in repr(structure)
+            self.structure = structure
 
         def propose(self, assembly):
-            # Make sure the repr doesn't crash.
-            repr(assembly)
+            assert '{' not in repr(assembly)
 
-            # Include every PDB id, just to make sure they're all calculated 
+            # Record every PDB id, just to make sure they're all calculated 
             # correctly.
             tag = (
-                    assembly.struct_pdb_id,
-                    assembly.model_pdb_ids,
-                    assembly.assembly_pdb_id,
+                    self.structure.pdb_id,
+                    self.structure.model_pdb_ids,
+                    assembly.pdb_id,
                     assembly.subchain_pdb_ids,
             )
             visited_assemblies.append(tag)
@@ -429,15 +429,16 @@ def test_visit_assemblies_memento(tmp_path):
         def accept(self, candidates, memento):
             memento.save(memento_path)
 
-            self.iterations += 1
-            if self.iterations == self.interrupt_iteration:
+            nonlocal iterations
+            iterations += 1
+            if iterations == 2:
                 raise MockInterruption
 
     class MockInterruption(Exception):
         pass
 
     try:
-        mmc.visit_assemblies(db, MockVisitor(2))
+        mmc.visit_assemblies(db, MockVisitor)
     except MockInterruption:
         pass
 
@@ -447,7 +448,7 @@ def test_visit_assemblies_memento(tmp_path):
     ]
 
     memento = mmc.Memento.load(memento_path)
-    mmc.visit_assemblies(db, MockVisitor(-1), memento=memento)
+    mmc.visit_assemblies(db, MockVisitor, memento=memento)
 
     assert visited_assemblies == [
             ('1abc', ['1'], '1', ['A', 'B']),
@@ -980,23 +981,17 @@ def test_accept_nonredundant_subchains():
             'G': 'F',
     }
     accepted_clusters = {1}
-    accepted_candidates = set()
+    accepted_candidate_indices = set()
 
     _mmc._accept_nonredundant_subchains(
             candidates,
             cluster_map,
             chain_map,
-            accepted_candidates,
+            accepted_candidate_indices,
             accepted_clusters,
     )
 
-    assert accepted_candidates == {
-            candidates[3],
-            candidates[4],
-            candidates[5],
-            candidates[7],
-            candidates[8],
-    }
+    assert accepted_candidate_indices == {3, 4, 5, 7, 8}
     assert accepted_clusters == {1,2,3,4}
 
 def test_accept_nonredundant_subchain_pairs():
@@ -1066,23 +1061,17 @@ def test_accept_nonredundant_subchain_pairs():
     accepted_cluster_pairs = {
             frozenset((1,2)),
     }
-    accepted_candidates = set()
+    accepted_candidate_indices = set()
 
     _mmc._accept_nonredundant_subchain_pairs(
             candidates,
             cluster_map,
             chain_map,
-            accepted_candidates,
+            accepted_candidate_indices,
             accepted_cluster_pairs,
     )
 
-    assert accepted_candidates == {
-            candidates[4],
-            candidates[5],
-            candidates[6],
-            candidates[8],
-            candidates[9],
-    }
+    assert accepted_candidate_indices == {4, 5, 6, 8, 9}
     assert accepted_cluster_pairs == {
             frozenset((1,2)),
             frozenset((3,4)),

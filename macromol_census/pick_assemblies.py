@@ -15,7 +15,7 @@ import pickle
 from .database_io import open_db, transaction
 from .util import tquiet
 from dataclasses import dataclass
-from itertools import combinations
+from itertools import combinations, combinations_with_replacement
 from more_itertools import flatten
 from functools import cached_property
 from tqdm import tqdm
@@ -30,11 +30,39 @@ class Visitor:
     The default implementation doesn't actually do any filtering.
     """
 
+    def __init__(self, structure):
+        raise NotImplementedError
+
     def propose(self, assembly):
         raise NotImplementedError
 
     def accept(self, candidates, memento):
         raise NotImplementedError
+
+class Structure:
+
+    def __init__(self, db, struct_id):
+        self._db = db
+        self._struct_id = struct_id
+
+    def __repr__(self):
+        return f'<Structure {self.pdb_id}>'
+
+    @property
+    def pdb_id(self):
+        df = self._db.sql(
+                'SELECT pdb_id FROM structure WHERE id = ?',
+                params=[self._struct_id],
+        ).pl()
+        return df['pdb_id'].item()
+
+    @cached_property
+    def model_pdb_ids(self):
+        df = self._db.sql(
+                'SELECT pdb_id FROM model WHERE struct_id = ?',
+                params=[self._struct_id],
+        ).pl()
+        return df['pdb_id'].to_list()
 
 class Assembly:
 
@@ -49,31 +77,10 @@ class Assembly:
         self._subchain_clusters = subchain_clusters
 
     def __repr__(self):
-        return f'<Assembly structure={self.struct_pdb_id} assembly={self.assembly_pdb_id}>'
+        return f'<Assembly {self.pdb_id}>'
 
     @cached_property
-    def struct_pdb_id(self):
-        df = self._db.sql('''\
-                SELECT structure.pdb_id
-                FROM assembly
-                JOIN structure ON structure.id = assembly.struct_id
-                WHERE assembly.id = ?
-        ''', params=[self._assembly_id]).pl()
-        return df['pdb_id'].item()
-
-    @cached_property
-    def model_pdb_ids(self):
-        df = self._db.sql('''\
-                SELECT model.pdb_id
-                FROM assembly
-                JOIN structure ON structure.id = assembly.struct_id
-                JOIN model ON structure.id = model.struct_id
-                WHERE assembly.id = ?
-        ''', params=[self._assembly_id]).pl()
-        return df['pdb_id'].to_list()
-
-    @cached_property
-    def assembly_pdb_id(self):
+    def pdb_id(self):
         df = self._db.sql(
                 'SELECT pdb_id FROM assembly WHERE id = ?',
                 params=[self._assembly_id],
@@ -105,12 +112,6 @@ class Candidate:
     subchains: Iterable[PdbId] = frozenset()
     subchain_pairs: Iterable[tuple[PdbId, PdbId]] = frozenset()
 
-    def __eq__(self, other):
-        return self is other
-
-    def __hash__(self):
-        return hash(id(self))
-
 def main():
     import docopt
 
@@ -126,6 +127,9 @@ def pick_assemblies(db, progress_factory=tquiet):
 
     class PickVisitor(Visitor):
         _subchain_col = 'subchain_id'
+
+        def __init__(self, _):
+            pass
 
         def propose(self, assembly):
             # Note that we're accessing private members of the Assembly class 
@@ -161,7 +165,7 @@ def pick_assemblies(db, progress_factory=tquiet):
                     sorted(flatten(x.subchain_pairs for x in candidates))
             )
 
-    visit_assemblies(db, PickVisitor(), progress_factory=progress_factory)
+    visit_assemblies(db, PickVisitor, progress_factory=progress_factory)
 
     nonredundant_df = pl.DataFrame(
             nonredundant,
@@ -181,11 +185,11 @@ def pick_assemblies(db, progress_factory=tquiet):
             SELECT subchain_id_1, subchain_id_2 FROM nonredundant_pairs_df;
     ''')
 
-def visit_assemblies(db, visitor, *, memento=None, progress_factory=tquiet):
-    # KBK: Below is an outline of the original algorithm I planned.  The final 
-    # version ended up a little different, but I haven't updated the notes yet.  
-
+def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tquiet):
     """
+    KBK: Below is an outline of the original algorithm I planned.  The final 
+    version ended up a little different, but I haven't updated the notes yet.  
+
     Get relevant assemblies:
     
     - Remove any that are blacklisted
@@ -232,9 +236,10 @@ def visit_assemblies(db, visitor, *, memento=None, progress_factory=tquiet):
 
     relevant_subchains = _select_relevant_subchains(db)
     relevant_assemblies = _select_relevant_assemblies(db, relevant_subchains)
-    assembly_subchains = db.sql('''\
+    ranked_subchains = db.sql('''\
             SELECT
                 structure.rank AS rank,
+                structure.id AS struct_id,
                 assembly.id AS assembly_id,
                 subchain.chain_id AS chain_id,
                 subchain.id AS subchain_id,
@@ -256,56 +261,91 @@ def visit_assemblies(db, visitor, *, memento=None, progress_factory=tquiet):
 
     if (last_assembly_id := memento._assembly_id) is not None:
         last_rank = _select_assembly_rank(db, last_assembly_id)
-        assembly_subchains = (
-                assembly_subchains
+        ranked_subchains = (
+                ranked_subchains
                 .filter(
-                    (pl.col('rank') >= last_rank) &
-                    (pl.col('assembly_id') > last_assembly_id)
+                    (pl.col('rank') > last_rank) | (
+                        (pl.col('rank') == last_rank) &
+                        (pl.col('assembly_id') > last_assembly_id)
+                    )
                 )
         )
 
-    n = assembly_subchains.n_unique('assembly_id')
+    n = ranked_subchains.n_unique('struct_id')
     progress = progress_factory(total=n)
-    subchain_col = getattr(visitor, '_subchain_col', 'subchain_pdb_id')
 
-    for (assembly_id,), assembly_subchains_i in (
-            assembly_subchains.group_by(['assembly_id'], maintain_order=True)
+    def all_clusters_redundant(subchain_clusters):
+        clusters = set(subchain_clusters['cluster_id'])
+        if clusters - memento._accepted_clusters:
+            return False
+
+        cluster_pairs = {
+                frozenset(x)
+                for x in combinations_with_replacement(clusters, r=2)
+        }
+        if cluster_pairs - memento._accepted_cluster_pairs:
+            return False
+
+        return True
+
+    for (struct_id,), struct_subchains_i in (
+            ranked_subchains.group_by(['struct_id'], maintain_order=True)
     ):
         progress.update()
 
-        assembly = Assembly(db, assembly_id, assembly_subchains_i)
-        candidates = list(visitor.propose(assembly))
+        if all_clusters_redundant(struct_subchains_i):
+            continue
 
-        cluster_map = dict(
-                assembly_subchains_i
-                .select(subchain_col, 'cluster_id')
-                .iter_rows()
-        )
-        chain_map = dict(
-                assembly_subchains_i
-                .select(subchain_col, 'chain_id')
-                .iter_rows()
-        )
-        accepted_candidates = set()
+        struct = Structure(db, struct_id)
+        visitor = visitor_factory(struct)
+        subchain_col = getattr(visitor, '_subchain_col', 'subchain_pdb_id')
 
-        _accept_nonredundant_subchains(
-                candidates,
-                cluster_map,
-                chain_map,
-                accepted_candidates,
-                memento._accepted_clusters,
-        )
-        _accept_nonredundant_subchain_pairs(
-                candidates,
-                cluster_map,
-                chain_map,
-                accepted_candidates,
-                memento._accepted_cluster_pairs,
-        )
+        for (assembly_id,), assembly_subchains_j in (
+                struct_subchains_i.group_by(
+                    ['assembly_id'],
+                    maintain_order=True,
+                )
+        ):
+            if all_clusters_redundant(assembly_subchains_j):
+                continue
 
-        memento._assembly_id = assembly_id
-        visitor.accept(accepted_candidates, memento)
+            assembly = Assembly(db, assembly_id, assembly_subchains_j)
+            candidates = list(visitor.propose(assembly))
 
+            cluster_map = dict(
+                    assembly_subchains_j
+                    .select(subchain_col, 'cluster_id')
+                    .iter_rows()
+            )
+            chain_map = dict(
+                    assembly_subchains_j
+                    .select(subchain_col, 'chain_id')
+                    .iter_rows()
+            )
+            accepted_candidate_indices = set()
+
+            _accept_nonredundant_subchains(
+                    candidates,
+                    cluster_map,
+                    chain_map,
+                    accepted_candidate_indices,
+                    memento._accepted_clusters,
+            )
+            _accept_nonredundant_subchain_pairs(
+                    candidates,
+                    cluster_map,
+                    chain_map,
+                    accepted_candidate_indices,
+                    memento._accepted_cluster_pairs,
+            )
+
+            accepted_candidates = [
+                    candidates[i]
+                    for i in sorted(accepted_candidate_indices)
+            ]
+
+            memento._assembly_id = assembly_id
+            visitor.accept(accepted_candidates, memento)
 
 def _select_relevant_subchains(db):
     """
@@ -383,11 +423,10 @@ def _select_relevant_assemblies(db, subchain_cluster):
       at all (e.g. from NMR structures) are not excluded by this criterion.  If 
       the assembly has multiple resolutions, only the lowest is considered.
 
-    Not all of the assemblies returned by 
-    this function will necessarily end up in the final dataset.  They 
-    have not yet been filtered for redundancy.  However, any assemblies 
-    not returned by this function will not be included in the final 
-    dataset.
+    Not all of the assemblies returned by this function will necessarily end up 
+    in the final dataset.  They have not yet been filtered for redundancy.  
+    However, any assemblies not returned by this function will not be included 
+    in the final dataset.
     """
     assembly_cluster = db.sql('''\
             SELECT
@@ -450,13 +489,13 @@ def _accept_nonredundant_subchains(
         candidates: list[Candidate],
         cluster_map: dict[str, int],
         chain_map: dict[str, int],
-        accepted_candidates: set[Candidate],
+        accepted_candidate_indices: set[int],
         accepted_clusters: set[int],
 ):
     groups = {}
-    for candidate in candidates:
+    for i, candidate in enumerate(candidates):
         for k in candidate.subchains:
-            groups.setdefault(k, []).append(candidate)
+            groups.setdefault(k, []).append(i)
 
     def get_priority(subchain):
         prevalence = -len(groups[subchain])
@@ -465,21 +504,21 @@ def _accept_nonredundant_subchains(
     for subchain in sorted(groups, key=get_priority):
         cluster = cluster_map[subchain]
         if cluster not in accepted_clusters:
-            accepted_candidates.update(groups[subchain])
+            accepted_candidate_indices.update(groups[subchain])
             accepted_clusters.add(cluster)
 
 def _accept_nonredundant_subchain_pairs(
         candidates: list[Candidate],
         cluster_map: dict[str, int],
         chain_map: dict[str, int],
-        accepted_candidates: set[Candidate],
+        accepted_candidate_indices: set[int],
         accepted_cluster_pairs: set[int],
 ):
     groups = {}
-    for candidate in candidates:
+    for i, candidate in enumerate(candidates):
         for k in candidate.subchain_pairs:
             k = frozenset(k); assert len(k) == 2
-            groups.setdefault(k, []).append(candidate)
+            groups.setdefault(k, []).append(i)
 
     def get_priority(pair):
         a, b = sorted(pair)
@@ -496,6 +535,6 @@ def _accept_nonredundant_subchain_pairs(
                 for k in subchain_pair
         )
         if cluster_pair not in accepted_cluster_pairs:
-            accepted_candidates.update(groups[subchain_pair])
+            accepted_candidate_indices.update(groups[subchain_pair])
             accepted_cluster_pairs.add(cluster_pair)
 
