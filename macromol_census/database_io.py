@@ -217,8 +217,9 @@ def init_db(db):
                 FOREIGN KEY(subchain_id) REFERENCES subchain(id)
             );
 
-            CREATE TABLE IF NOT EXISTS assembly_subchain_cover (
+            CREATE TABLE IF NOT EXISTS assembly_rank (
                 assembly_id INT NOT NULL,
+                rank INT NOT NULL,
                 FOREIGN KEY(assembly_id) REFERENCES assembly(id)
             )
     ''')
@@ -626,10 +627,21 @@ def insert_blacklisted_structures(db, blacklist):
             JOIN structure USING (pdb_id)
     ''')
 
-def insert_assembly_subchain_cover(db, cover):
+def insert_assembly_ranks(db, ranks):
+    """
+    Arguments:
+        ranks:
+            A dataframe with the following columns:
+
+            - ``assembly_id``: References to rows in the *assembly* table.
+            - ``rank``: Ranks are relative to other assemblies within the same 
+              structure, so it's ok for different structures to reuse the same 
+              ranks.  Assemblies not assigned a rank (i.e. not present in this 
+              dataframe) are considered unsuitable to include to the dataset.
+    """
     db.execute('''\
-            INSERT INTO assembly_subchain_cover (assembly_id)
-            SELECT assembly_id FROM cover
+            INSERT INTO assembly_rank (assembly_id, rank)
+            SELECT assembly_id, rank FROM ranks
     ''')
 
 def insert_nmr_quality(db, struct_id, *, source, num_dist_restraints=None):
@@ -730,8 +742,8 @@ def select_assemblies(db):
 def select_assembly_subchains(db):
     return db.execute('SELECT * FROM assembly_subchain').pl()
 
-def select_assembly_subchain_covers(db):
-    return db.execute('SELECT * FROM assembly_subchain_cover').pl()
+def select_assembly_ranks(db):
+    return db.execute('SELECT * FROM assembly_rank').pl()
 
 def select_chains(db):
     return db.execute('SELECT * FROM chain').pl()

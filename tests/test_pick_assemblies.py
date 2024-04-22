@@ -165,14 +165,14 @@ def test_pick_assemblies():
             ]),
     )
 
-    mmc.insert_assembly_subchain_cover(
+    mmc.insert_assembly_ranks(
             db,
             pl.DataFrame([
-                dict(assembly_id=1),
-                dict(assembly_id=2),
-                dict(assembly_id=3),
-                dict(assembly_id=4),
-                dict(assembly_id=5),
+                dict(assembly_id=1, rank=1),
+                dict(assembly_id=2, rank=1),
+                dict(assembly_id=3, rank=1),
+                dict(assembly_id=4, rank=1),
+                dict(assembly_id=5, rank=1),
             ]),
     )
 
@@ -223,10 +223,8 @@ def test_pick_assemblies_chain():
     #
     # Note that this isn't a perfect solution.  For example, you can still 
     # imagine picking non-adjacent monomers from an multimeric structure.  A 
-    # proper solution would require working out the distances between each 
-    # subchain when ingesting the mmCIF files (and all the coordinates are 
-    # available).  But I think this would be expensive, and the benefit 
-    # marginal, so for now I'm just using the chain heuristic.
+    # proper solution would require implementing a visitor, but this is meant 
+    # to do something reasonable by default.
 
     mmc.insert_structure(
             db, '1abc',
@@ -263,10 +261,10 @@ def test_pick_assemblies_chain():
             ]),
     )
 
-    mmc.insert_assembly_subchain_cover(
+    mmc.insert_assembly_ranks(
             db,
             pl.DataFrame([
-                dict(assembly_id=1),
+                dict(assembly_id=1, rank=1),
             ]),
     )
 
@@ -381,13 +379,13 @@ def test_visit_assemblies_memento(tmp_path):
                 dict(struct_id=3, rank=3),
             ]),
     )
-    mmc.insert_assembly_subchain_cover(
+    mmc.insert_assembly_ranks(
             db,
             pl.DataFrame([
-                dict(assembly_id=1),
-                dict(assembly_id=2),
-                dict(assembly_id=3),
-                dict(assembly_id=4),
+                dict(assembly_id=1, rank=1),
+                dict(assembly_id=2, rank=1),
+                dict(assembly_id=3, rank=2),
+                dict(assembly_id=4, rank=1),
             ]),
     )
     mmc.insert_entity_clusters(
@@ -533,10 +531,9 @@ def test_select_relevant_assemblies():
 
     # Subchain cover
     # ==============
-    # `1abc` has redundant assemblies (1 has the same subchains as 2 and 3 
-    # together).  Only the first will be part of the "subchain cover", 
-    # therefore only the first will be considered "relevant".
-
+    # `1abc` has two assemblies that won't be assigned a rank (1 has the same 
+    # subchains as 2 and 3, so the latter are redundant) and therefore should 
+    # not be considered "relevant".
     struct_id_1 = mmc.insert_structure(
             db, '1abc',
             exptl_methods=[],
@@ -569,7 +566,6 @@ def test_select_relevant_assemblies():
     # Structure blacklist
     # ===================
     # `2abc` is irrelevant because it will be placed on the "blacklist":
-    
     struct_id_2 = mmc.insert_structure(
             db, '2abc',
             exptl_methods=[],
@@ -626,12 +622,12 @@ def test_select_relevant_assemblies():
             ]),
     )
 
-    mmc.insert_assembly_subchain_cover(
+    mmc.insert_assembly_ranks(
             db,
             pl.DataFrame([
-                dict(assembly_id=1),
-                dict(assembly_id=4),
-                dict(assembly_id=5),
+                dict(assembly_id=1, rank=1),
+                dict(assembly_id=4, rank=1),
+                dict(assembly_id=5, rank=1),
             ]),
     )
 
@@ -655,7 +651,7 @@ def test_select_relevant_assemblies():
     assemblies = _mmc._select_relevant_assemblies(db, subchains)
 
     assert assemblies.to_dicts() == [
-            dict(assembly_id=1),
+            dict(assembly_id=1, rank=1),
     ]
 
 def test_select_relevant_assemblies_resolution():
@@ -836,15 +832,15 @@ def test_select_relevant_assemblies_resolution():
             ]),
     )
 
-    mmc.insert_assembly_subchain_cover(
+    mmc.insert_assembly_ranks(
             db,
             pl.DataFrame([
-                dict(assembly_id=1),
-                dict(assembly_id=2),
-                dict(assembly_id=3),
-                dict(assembly_id=4),
-                dict(assembly_id=5),
-                dict(assembly_id=6),
+                dict(assembly_id=1, rank=1),
+                dict(assembly_id=2, rank=1),
+                dict(assembly_id=3, rank=1),
+                dict(assembly_id=4, rank=1),
+                dict(assembly_id=5, rank=1),
+                dict(assembly_id=6, rank=1),
             ]),
     )
 
@@ -852,18 +848,22 @@ def test_select_relevant_assemblies_resolution():
     assemblies = _mmc._select_relevant_assemblies(db, subchains)
 
     assert assemblies.to_dicts() == [
-            dict(assembly_id=1),
-            dict(assembly_id=4),
-            dict(assembly_id=5),
-            dict(assembly_id=6),
+            dict(assembly_id=1, rank=1),
+            dict(assembly_id=4, rank=1),
+            dict(assembly_id=5, rank=1),
+            dict(assembly_id=6, rank=1),
     ]
 
 def test_select_assembly_rank():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
-    # Both structures have two assemblies.  The first is lower resolution than 
-    # the first, so should have a lower rank.
+    # Both structures have two assemblies.  The second structure is higher 
+    # resolution than the first, so should have a better rank.
+
+    # In the first structure, the assemblies are ranked in the opposite of the 
+    # order they appear in.  In the second structure, they're ranked in the 
+    # same order.
 
     mmc.insert_structure(
             db, '1abc',
@@ -872,8 +872,8 @@ def test_select_assembly_rank():
             full_atom=True,
 
             assemblies=pl.DataFrame([
-                dict(id='1', type=None, polymer_count=1),
-                dict(id='2', type=None, polymer_count=1),
+                dict(id='1', type='author_defined_assembly', polymer_count=1),
+                dict(id='2', type='author_defined_assembly', polymer_count=2),
             ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
@@ -902,8 +902,8 @@ def test_select_assembly_rank():
             full_atom=True,
 
             assemblies=pl.DataFrame([
-                dict(id='1', type=None, polymer_count=1),
-                dict(id='2', type=None, polymer_count=1),
+                dict(id='1', type='author_defined_assembly', polymer_count=1),
+                dict(id='2', type='author_defined_assembly', polymer_count=1),
             ]),
             assembly_subchains=pl.DataFrame([
                 dict(assembly_id='1', subchain_id='A'),
@@ -929,10 +929,13 @@ def test_select_assembly_rank():
     ranks = mmc.rank_structures(db)
     mmc.update_structure_ranks(db, ranks)
 
-    assert _mmc._select_assembly_rank(db, 1) == 2
-    assert _mmc._select_assembly_rank(db, 2) == 2
-    assert _mmc._select_assembly_rank(db, 3) == 1
-    assert _mmc._select_assembly_rank(db, 4) == 1
+    ranks = mmc.rank_assemblies(db)
+    mmc.insert_assembly_ranks(db, ranks)
+
+    assert _mmc._select_assembly_rank(db, 1) == (2, 2)
+    assert _mmc._select_assembly_rank(db, 2) == (2, 1)
+    assert _mmc._select_assembly_rank(db, 3) == (1, 1)
+    assert _mmc._select_assembly_rank(db, 4) == (1, 2)
 
 def test_accept_nonredundant_subchains():
     # - Empty candidate is ignored, without causing any problems.

@@ -13,10 +13,10 @@ from .ingest_validation import *
 from .ingest_blacklist import *
 from .ingest_entity_clusters import *
 from .ingest_nonspecific_ligands import *
-from .rank_structures import *
-from .pick_assemblies import *
-from .find_assembly_subchain_cover import *
 from .find_identical_branched_entities import *
+from .rank_structures import *
+from .rank_assemblies import *
+from .pick_assemblies import *
 from .extract_fasta import *
 from .extract_nonredundant_assemblies import *
 from .util import *

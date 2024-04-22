@@ -16,7 +16,7 @@ from .database_io import open_db, transaction
 from .util import tquiet
 from dataclasses import dataclass
 from itertools import combinations, combinations_with_replacement
-from more_itertools import flatten
+from more_itertools import one, flatten
 from functools import cached_property
 from tqdm import tqdm
 
@@ -238,9 +238,10 @@ def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tqui
     relevant_assemblies = _select_relevant_assemblies(db, relevant_subchains)
     ranked_subchains = db.sql('''\
             SELECT
-                structure.rank AS rank,
                 structure.id AS struct_id,
+                structure.rank AS struct_rank,
                 assembly.id AS assembly_id,
+                relevant_assemblies.rank AS assembly_rank,
                 subchain.chain_id AS chain_id,
                 subchain.id AS subchain_id,
                 subchain.pdb_id AS subchain_pdb_id,
@@ -251,7 +252,7 @@ def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tqui
             JOIN structure ON structure.id = assembly.struct_id
             JOIN subchain ON subchain.id = assembly_subchain.subchain_id
             JOIN relevant_subchains USING (subchain_id)
-            ORDER BY rank, assembly_id, chain_id, subchain_id
+            ORDER BY struct_rank, assembly_rank, chain_id, subchain_id
     ''').pl()
 
     # This isn't guaranteed to free the memory used by these data frames, but 
@@ -260,13 +261,15 @@ def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tqui
     del relevant_assemblies
 
     if (last_assembly_id := memento._assembly_id) is not None:
-        last_rank = _select_assembly_rank(db, last_assembly_id)
+        last_struct_rank, last_assembly_rank = \
+                _select_assembly_rank(db, last_assembly_id)
+
         ranked_subchains = (
                 ranked_subchains
                 .filter(
-                    (pl.col('rank') > last_rank) | (
-                        (pl.col('rank') == last_rank) &
-                        (pl.col('assembly_id') > last_assembly_id)
+                    (pl.col('struct_rank') > last_struct_rank) | (
+                        (pl.col('struct_rank') == last_struct_rank) &
+                        (pl.col('assembly_rank') > last_assembly_rank)
                     )
                 )
         )
@@ -415,16 +418,16 @@ def _select_relevant_assemblies(db, subchain_cluster):
 
     An assembly is deemed eligible to include in the dataset if:
 
+    - It has been assigned a rank.  This indicates that (by some measures) it's 
+      biologically relevant and not redundant.
     - It does not appear in a blacklisted structure.
     - It does not share a subchain cluster with any blacklisted assemblies.
-    - It is part of the "assembly cover", i.e. the minimal set of assemblies 
-      needed to include every subchain.
     - It has a resolution below 10Å.  Assemblies that don't have a resolution 
       at all (e.g. from NMR structures) are not excluded by this criterion.  If 
-      the assembly has multiple resolutions, only the lowest is considered.
+      the assembly has multiple resolutions, only the best is considered.
 
     Not all of the assemblies returned by this function will necessarily end up 
-    in the final dataset.  They have not yet been filtered for redundancy.  
+    in the final dataset.  There are more redundancy checks to follow.  
     However, any assemblies not returned by this function will not be included 
     in the final dataset.
     """
@@ -469,21 +472,23 @@ def _select_relevant_assemblies(db, subchain_cluster):
     ''')
 
     return db.sql('''\
-            SELECT
-                assembly_subchain_cover.assembly_id AS assembly_id
-            FROM assembly_subchain_cover
+            SELECT assembly_id, rank
+            FROM assembly_rank
             ANTI JOIN assembly_blacklist USING (assembly_id)
             ANTI JOIN assembly_low_res USING (assembly_id)
     ''').pl()
 
 def _select_assembly_rank(db, assembly_id):
     df = db.sql('''\
-            SELECT DISTINCT structure.rank AS rank,
-            FROM structure
-            JOIN assembly ON structure.id = assembly.struct_id
+            SELECT
+                structure.rank AS struct_rank,
+                assembly_rank.rank AS assembly_rank,
+            FROM assembly
+            JOIN structure ON structure.id = assembly.struct_id
+            JOIN assembly_rank ON assembly.id = assembly_rank.assembly_id
             WHERE assembly.id = ?
     ''', params=[assembly_id]).pl()
-    return df['rank'].item()
+    return one(df.iter_rows())
 
 def _accept_nonredundant_subchains(
         candidates: list[Candidate],

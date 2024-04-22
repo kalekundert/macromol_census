@@ -66,7 +66,7 @@ def insert_quality_metrics(
         )
 
 
-def test_rank_assemblies_resolution():
+def test_rank_structures_resolution():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
@@ -104,7 +104,7 @@ def test_rank_assemblies_resolution():
             dict(struct_id=1, rank=5),
     ]
 
-def test_rank_assemblies_clashscore():
+def test_rank_structures_clashscore():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
@@ -133,7 +133,7 @@ def test_rank_assemblies_clashscore():
             dict(struct_id=1, rank=3),
     ]
 
-def test_rank_assemblies_quality():
+def test_rank_structures_quality():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
@@ -204,7 +204,7 @@ def test_rank_assemblies_quality():
             dict(struct_id=1, rank=9),
     ]
 
-def test_rank_assemblies_tiebreakers():
+def test_rank_structures_tiebreakers():
     db = mmc.open_db(':memory:')
     mmc.init_db(db)
 
