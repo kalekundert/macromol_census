@@ -940,48 +940,69 @@ def test_select_assembly_rank():
 def test_accept_nonredundant_subchains():
     # - Empty candidate is ignored, without causing any problems.
     #
-    # - A is excluded because it's part of a cluster that's already been 
-    #   accepted.
+    # - (A,0) and (A,1) are excluded because they're part of a cluster that's 
+    #   already been accepted.
     #
-    # - B and C are in the same cluster.  C gets accepted, because it appears 
+    # - B and C have the same cluster.  C gets accepted, because it appears 
     #   more frequently.  The candidate that contains both B and C also gets 
     #   accepted; just one unique feature is required to be accepted.
     #
-    # - D and E are in the same cluster.  E gets accepted because it's from an 
-    #   earlier chain.  The purpose of this ranking is to encourage picking 
-    #   subchains from the same chain (assuming they'll be more likely to 
-    #   interact) in the absence of any other distinguishing features.
+    # - (D,0) and (D,1) have the same cluster.  (D,1) gets accepted for the 
+    #   same reason as above.
+    #   
+    # - E and F have the same cluster.  F gets accepted because it scores 
+    #   better, despite appearing less frequently.
     #
-    # - F and G are in the same cluster and the same chain.  F gets picked 
-    #   because it comes first alphabetically.  This is just a tie-breaker to 
-    #   make the sorting algorithm deterministic.
+    # - (G,0) and (G,1) have the same cluster.  (G,1) gets accepted for the 
+    #   same reason as above.
+    #
+    # - H and I have the same cluster and score.  H gets accepted because it 
+    #   appears first alphabetically.  This is just a tie-breaker to make the 
+    #   sorting algorithm deterministic.
+    #
+    # - (J,0) and (J,1) have the same cluster and score.  (J,0) gets accepted 
+    #   for the same reason as above.
 
     candidates = [
             mmc.Candidate(),
-            mmc.Candidate(subchains=['A']),
-            mmc.Candidate(subchains=['B']),
-            mmc.Candidate(subchains=['B', 'C']),    # accepted
-            mmc.Candidate(subchains=['C']),         # accepted
-            mmc.Candidate(subchains=['C']),         # accepted
-            mmc.Candidate(subchains=['D']),
-            mmc.Candidate(subchains=['E']),         # accepted
-            mmc.Candidate(subchains=['F']),         # accepted
-            mmc.Candidate(subchains=['G']),
+
+            mmc.Candidate(subchains=[('A', 0)]),
+            mmc.Candidate(subchains=[('A', 1)]),
+
+            mmc.Candidate(subchains=[('B', 0)]),
+            mmc.Candidate(subchains=[('B', 0), ('C', 0)]),      # accepted
+            mmc.Candidate(subchains=[('C', 0)]),                # accepted
+            mmc.Candidate(subchains=[('C', 0)]),                # accepted
+
+            mmc.Candidate(subchains=[('D', 0)]),
+            mmc.Candidate(subchains=[('D', 0), ('D', 1)]),      # accepted
+            mmc.Candidate(subchains=[('D', 1)]),                # accepted
+            mmc.Candidate(subchains=[('D', 1)]),                # accepted
+
+            mmc.Candidate(subchains=[('E', 0)]),
+            mmc.Candidate(subchains=[('E', 0)]),
+            mmc.Candidate(subchains=[('F', 0)], score=-3),      # accepted
+
+            mmc.Candidate(subchains=[('G', 0)]),
+            mmc.Candidate(subchains=[('G', 0)]),
+            mmc.Candidate(subchains=[('G', 1)], score=-3),      # accepted
+
+            mmc.Candidate(subchains=[('H', 0)]),                # accepted
+            mmc.Candidate(subchains=[('I', 0)]),
+
+            mmc.Candidate(subchains=[('J', 0)]),                # accepted
+            mmc.Candidate(subchains=[('J', 1)]),
     ]
     cluster_map = {
             'A': 1,
             'B': 2, 'C': 2,
-            'D': 3, 'E': 3,
-            'F': 4, 'G': 4,
-    }
-    chain_map = {
-            'A': 'A',
-            'B': 'B',
-            'C': 'C',
-            'D': 'E',
-            'E': 'D',
-            'F': 'F',
-            'G': 'F',
+            'D': 3,
+            'E': 4, 'F': 4,
+            'G': 5,
+            'H': 6, 'I': 6,
+            'J': 7,
+
+            'Z': 99,  # make sure unused clusters aren't included.
     }
     accepted_clusters = {1}
     accepted_candidate_indices = set()
@@ -989,95 +1010,123 @@ def test_accept_nonredundant_subchains():
     _mmc._accept_nonredundant_subchains(
             candidates,
             cluster_map,
-            chain_map,
             accepted_candidate_indices,
             accepted_clusters,
     )
 
-    assert accepted_candidate_indices == {3, 4, 5, 7, 8}
-    assert accepted_clusters == {1,2,3,4}
+    assert accepted_candidate_indices == {4, 5, 6, 8, 9, 10, 13, 16, 17, 19}
+    assert accepted_clusters == {1,2,3,4,5,6,7}
 
 def test_accept_nonredundant_subchain_pairs():
     # - Empty candidate is ignored, without causing any problems.
     #
     # - (A,B) is excluded because its cluster pair has already been accepted.
     #
-    # - (C,D) and (C,E) have the same cluster pair.  (C,E) gets accepted, 
+    # - [(C,0),(C,1)] is excluded because its cluster pair has already been 
+    #   accepted.
+    #
+    # - (D,E) and (D,F) have the same cluster pair.  (C,E) gets accepted, 
     #   because it appears more frequently.  The candidate that contains both 
-    #   pairs also gets accepted.  It just matters that the candidate has a 
-    #   unique pair, it doesn't matter if it also has non-unique pairs.
+    #   pairs also gets accepted.  It only matters that the candidate has a 
+    #   unique pair; it doesn't matter if it also has non-unique pairs.
     #
-    # - (F,G) and (F,H) have the same cluster pair.  (F,H) is accepted because 
-    #   both subchains belong to the same chain, unlike (F,G).  In the absence 
-    #   of any other information, this indicates that F and H are more likely 
-    #   to be truly interacting.
+    # - [(G,0),(G,1)] and [(G,0),(G,2)] have the same cluster pair.  
+    #   [(G,0),(G,2)] gets accepted for the same reason as above.
+    #   
+    # - (H,I) and (H,J) have the same cluster pair.  (H,J) gets accepted 
+    #   because it scores better, despite appearing less frequently.
     #
-    # - (I,J) and (I,K) have the same cluster pair and belong to the same 
-    #   chain.  (I,J) is accepted because it comes first alphabetically.  This 
-    #   is just a tie-breaker to make the sorting algorithm deterministic.  
-    #   This cluster pair also features the same cluster twice, rather than two 
-    #   different clusters.  This shouldn't affect the logic at all.
+    # - [(K,0),(K,1)] and [(K,0),(K,2)] have the same cluster pair.  
+    #   [(K,0),(K,2)] gets accepted for the same reason as above.
+    #
+    # - (L,M) and (L,N) have the same cluster pair and score.  (L,M) gets 
+    #   accepted because it appears first alphabetically.  This is just a 
+    #   tie-breaker to make the sorting algorithm deterministic.
+    #
+    # - (J,0) and (J,1) have the same cluster and score.  (J,0) gets accepted 
+    #   for the same reason as above.
+
+    def C(*pairs, **kwargs):
+        return mmc.Candidate(subchain_pairs=pairs, **kwargs)
 
     candidates = [
-            mmc.Candidate(),
+            C(),
 
-            mmc.Candidate(subchain_pairs=[('A','B')]),
-            mmc.Candidate(subchain_pairs=[('B','A')]),
+            C( (('A',0),('B',0)) ),
+            C( (('B',0),('A',0)) ),
 
-            mmc.Candidate(subchain_pairs=[('C','D')]),
-            mmc.Candidate(subchain_pairs=[('D','C'), ('C','E')]),   # accepted
-            mmc.Candidate(subchain_pairs=[('C','E')]),              # accepted
-            mmc.Candidate(subchain_pairs=[('E','C')]),              # accepted
+            C( (('C',0),('C',1)) ),
+            C( (('C',1),('C',0)) ),
 
-            mmc.Candidate(subchain_pairs=[('F','G')]),
-            mmc.Candidate(subchain_pairs=[('F','H')]),              # accepted
+            C( (('D',0),('E',0)) ),
+            C( (('E',0),('D',0)), (('D',0), ('F',0)) ),     # accepted
+            C( (('D',0),('F',0)) ),                         # accepted
+            C( (('F',0),('D',0)) ),                         # accepted
 
-            mmc.Candidate(subchain_pairs=[('J','I')]),              # accepted
-            mmc.Candidate(subchain_pairs=[('I','K')]),
+            C( (('G',0),('G',1)) ),
+            C( (('G',1),('G',0)), (('G',0), ('G',2)) ),     # accepted
+            C( (('G',0),('G',2)) ),                         # accepted
+            C( (('G',2),('G',0)) ),                         # accepted
+
+            C( (('H',0),('I',0)) ),
+            C( (('H',0),('I',0)) ),
+            C( (('H',0),('J',0)), score=-3 ),               # accepted
+
+            C( (('K',0),('K',1)) ),
+            C( (('K',0),('K',1)) ),
+            C( (('K',0),('K',2)), score=-3 ),               # accepted
+
+            C( (('L',0),('M',0)) ),                         # accepted
+            C( (('L',0),('N',0)) ),
+
+            C( (('O',0),('O',1)) ),                         # accepted
+            C( (('O',0),('O',2)) ),
     ]
     cluster_map = {
-            'A': 1,
-            'B': 2,
+            'A': 2,
+            'B': 1,
+
             'C': 3,
-            'D': 4,
+
+            'D': 5,
             'E': 4,
-            'F': 5,
+            'F': 4,
+
             'G': 6,
-            'H': 6,
+
+            'H': 8,
             'I': 7,
             'J': 7,
-            'K': 7,
-    }
-    chain_map = {
-            'A': 'A',
-            'B': 'A',
-            'C': 'B',
-            'D': 'B',
-            'E': 'B',
-            'F': 'C',
-            'G': 'D',
-            'H': 'C',
-            'I': 'E',
-            'J': 'E',
-            'K': 'E',
+
+            'K': 9,
+
+            'L': 11,
+            'M': 10,
+            'N': 10,
+
+            'O': 12,
     }
     accepted_cluster_pairs = {
-            frozenset((1,2)),
+            (1,2),
+            (3,3),
     }
     accepted_candidate_indices = set()
 
     _mmc._accept_nonredundant_subchain_pairs(
             candidates,
             cluster_map,
-            chain_map,
             accepted_candidate_indices,
             accepted_cluster_pairs,
     )
 
-    assert accepted_candidate_indices == {4, 5, 6, 8, 9}
+    assert accepted_candidate_indices == {6, 7, 8, 10, 11, 12, 15, 18, 19, 21}
     assert accepted_cluster_pairs == {
-            frozenset((1,2)),
-            frozenset((3,4)),
-            frozenset((5,6)),
-            frozenset((7,7)),
+            (1,2),
+            (3,3),
+            (4,5),
+            (6,6),
+            (7,8),
+            (9,9),
+            (10,11),
+            (12,12),
     }

@@ -11,19 +11,20 @@ Arguments:
 
 import polars as pl
 import pickle
+import operator as op
 
 from .database_io import open_db, transaction
 from .util import tquiet
 from dataclasses import dataclass
 from itertools import combinations, combinations_with_replacement
 from more_itertools import one, flatten
-from functools import cached_property
+from functools import reduce, cached_property
 from tqdm import tqdm
 
-from typing import TypeAlias
+from typing import TypeAlias, Callable
 from collections.abc import Iterable
 
-PdbId: TypeAlias = str
+Subchain: TypeAlias = tuple[str, int]
 
 class Visitor:
     """
@@ -109,8 +110,9 @@ class Memento:
 
 @dataclass
 class Candidate:
-    subchains: Iterable[PdbId] = frozenset()
-    subchain_pairs: Iterable[tuple[PdbId, PdbId]] = frozenset()
+    subchains: Iterable[Subchain] = frozenset()
+    subchain_pairs: Iterable[tuple[Subchain, Subchain]] = frozenset()
+    score: float = -1
 
 def main():
     import docopt
@@ -144,26 +146,64 @@ def pick_assemblies(db, progress_factory=tquiet):
             # the primary keys in that they aren't globally unique).
             #
             # This function needs access to the primary keys, in order to 
-            # record the pick assemblies to the database.  This need doesn't 
+            # record the picked assemblies to the database.  This need doesn't 
             # violate any conventions, because this function isn't part of "the 
             # outside world".  However, because the Assembly class can't make 
             # this information public, it means that we need the concept of 
             # "module private" information.
-            subchain_ids = sorted(assembly._subchain_clusters['subchain_id'])
+
+            # Also note that we're prioritizing the subchains/subchain pairs 
+            # based on the chain they appear in.  The goal is to favor 
+            # subchains/subchain pairs that actually interact with each other.  
+            # This method doesn't know what actual interactions are happening 
+            # in the structure (custom visitors can be used for that), so we 
+            # have to do the best with the information we have.  And one simple 
+            # inference we can make is that subchains in the same chain are 
+            # more likely to interact.
+
+
+            chain_map = dict(
+                    assembly._subchain_clusters
+                    .select('subchain_id', 'chain_id')
+                    .iter_rows()
+            )
+            subchain_ids = sorted(chain_map)
 
             for subchain_id in subchain_ids:
-                yield Candidate(subchains=[subchain_id])
+                yield Candidate(
+                        subchains=[(subchain_id, 0)],
+                        score=chain_map[subchain_id],
+                )
 
             for subchain_pair in combinations(subchain_ids, r=2):
-                yield Candidate(subchain_pairs=[subchain_pair])
+                subchain_1, subchain_2 = subchain_pair
+                chain_1, chain_2 = chain_map[subchain_1], chain_map[subchain_2]
+
+                prefer_same_chain = (0 if chain_1 == chain_2 else 1)
+                prefer_early_chain = sorted((chain_1, chain_2))
+
+                yield Candidate(
+                        subchain_pairs=[((subchain_1, 0), (subchain_2, 0))],
+                        score=(prefer_same_chain, *prefer_early_chain),
+                )
 
         def accept(self, candidates, _):
             nonredundant.extend(
-                    sorted(flatten(x.subchains for x in candidates))
+                    sorted(flatten(
+                        [s for s, _ in c.subchains]
+                        for c in candidates
+                    ))
             )
             nonredundant_pairs.extend(
-                    sorted(flatten(x.subchain_pairs for x in candidates))
+                    sorted(flatten(
+                        [(s1, s2) for (s1,_), (s2,_) in c.subchain_pairs]
+                        for c in candidates
+                    ))
             )
+
+    @dataclass(kw_only=True)
+    class PickCandidate(Candidate):
+        subchain_ids: list[int]
 
     visit_assemblies(db, PickVisitor, progress_factory=progress_factory)
 
@@ -282,10 +322,9 @@ def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tqui
         if clusters - memento._accepted_clusters:
             return False
 
-        cluster_pairs = {
-                frozenset(x)
-                for x in combinations_with_replacement(clusters, r=2)
-        }
+        cluster_pairs = set(
+                combinations_with_replacement(sorted(clusters), r=2)
+        )
         if cluster_pairs - memento._accepted_cluster_pairs:
             return False
 
@@ -320,24 +359,17 @@ def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tqui
                     .select(subchain_col, 'cluster_id')
                     .iter_rows()
             )
-            chain_map = dict(
-                    assembly_subchains_j
-                    .select(subchain_col, 'chain_id')
-                    .iter_rows()
-            )
             accepted_candidate_indices = set()
 
             _accept_nonredundant_subchains(
                     candidates,
                     cluster_map,
-                    chain_map,
                     accepted_candidate_indices,
                     memento._accepted_clusters,
             )
             _accept_nonredundant_subchain_pairs(
                     candidates,
                     cluster_map,
-                    chain_map,
                     accepted_candidate_indices,
                     memento._accepted_cluster_pairs,
             )
@@ -493,53 +525,77 @@ def _select_assembly_rank(db, assembly_id):
 def _accept_nonredundant_subchains(
         candidates: list[Candidate],
         cluster_map: dict[str, int],
-        chain_map: dict[str, int],
         accepted_candidate_indices: set[int],
         accepted_clusters: set[int],
 ):
-    groups = {}
-    for i, candidate in enumerate(candidates):
-        for k in candidate.subchains:
-            groups.setdefault(k, []).append(i)
+    def iter_keys(candidate):
+        yield from candidate.subchains
 
-    def get_priority(subchain):
-        prevalence = -len(groups[subchain])
-        return prevalence, chain_map[subchain], subchain
+    def cluster_from_key(k):
+        subchain, _ = k
+        return cluster_map[subchain]
 
-    for subchain in sorted(groups, key=get_priority):
-        cluster = cluster_map[subchain]
-        if cluster not in accepted_clusters:
-            accepted_candidate_indices.update(groups[subchain])
-            accepted_clusters.add(cluster)
+    _accept_nonredundant_candidates(
+            candidates,
+            iter_keys,
+            cluster_from_key,
+            accepted_candidate_indices,
+            accepted_clusters,
+    )
 
 def _accept_nonredundant_subchain_pairs(
         candidates: list[Candidate],
         cluster_map: dict[str, int],
-        chain_map: dict[str, int],
         accepted_candidate_indices: set[int],
-        accepted_cluster_pairs: set[int],
+        accepted_cluster_pairs: set[tuple[int, int]],
+):
+    def iter_keys(candidate):
+        for pair in candidate.subchain_pairs:
+            assert len(pair) == 2
+            yield tuple(sorted(pair))
+
+    def cluster_from_key(k):
+        return tuple(sorted(
+                cluster_map[subchain]
+                for subchain, _ in k
+        ))
+
+    _accept_nonredundant_candidates(
+            candidates,
+            iter_keys,
+            cluster_from_key,
+            accepted_candidate_indices,
+            accepted_cluster_pairs,
+    )
+
+def _accept_nonredundant_candidates[K, C](
+        candidates: list[Candidate],
+        iter_keys: Callable[[Candidate], Iterable[K]],
+        cluster_from_key: Callable[[K], C],
+        accepted_candidate_indices: set[int],
+        accepted_clusters: set[C],
 ):
     groups = {}
+
     for i, candidate in enumerate(candidates):
-        for k in candidate.subchain_pairs:
-            k = frozenset(k); assert len(k) == 2
-            groups.setdefault(k, []).append(i)
+        for k in iter_keys(candidate):
+            group = groups.setdefault(k, dict(indices=[], scores=[]))
+            group['indices'].append(i)
+            group['scores'].append(candidate.score)
 
-    def get_priority(pair):
-        a, b = sorted(pair)
+    def get_score(k):
+        # Use `reduce()` instead of `sum()` because it allows the priorities to 
+        # be any type, if the visitor can be sure that there will only be one 
+        # candidate for each subchain/subchain pair.
+        score = reduce(op.add, groups[k]['scores'])
 
-        prevalence = -len(groups[pair])
-        same_chain = (0 if chain_map[a] == chain_map[b] else 1)
-        tie_breaker = (a, b)  # to make the sort deterministic
+        # This is just to guarantee that the sort is deterministic.
+        tie_breaker = k
 
-        return prevalence, same_chain, tie_breaker
+        return score, tie_breaker
 
-    for subchain_pair in sorted(groups, key=get_priority):
-        cluster_pair = frozenset(
-                cluster_map[k]
-                for k in subchain_pair
-        )
-        if cluster_pair not in accepted_cluster_pairs:
-            accepted_candidate_indices.update(groups[subchain_pair])
-            accepted_cluster_pairs.add(cluster_pair)
-
+    for k in sorted(groups, key=get_score):
+        cluster = cluster_from_key(k)
+        if cluster not in accepted_clusters:
+            accepted_candidate_indices.update(groups[k]['indices'])
+            accepted_clusters.add(cluster)
