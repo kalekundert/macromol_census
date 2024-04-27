@@ -279,6 +279,7 @@ def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tqui
     ranked_subchains = db.sql('''\
             SELECT
                 structure.id AS struct_id,
+                structure.pdb_id AS struct_pdb_id,
                 structure.rank AS struct_rank,
                 assembly.id AS assembly_id,
                 relevant_assemblies.rank AS assembly_rank,
@@ -330,9 +331,13 @@ def visit_assemblies(db, visitor_factory, *, memento=None, progress_factory=tqui
 
         return True
 
-    for (struct_id,), struct_subchains_i in (
-            ranked_subchains.group_by(['struct_id'], maintain_order=True)
+    for (struct_id, struct_pdb_id), struct_subchains_i in (
+            ranked_subchains.group_by(
+                ['struct_id', 'struct_pdb_id'],
+                maintain_order=True,
+            )
     ):
+        progress.set_description(struct_pdb_id)
         progress.update()
 
         if all_clusters_redundant(struct_subchains_i):

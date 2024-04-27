@@ -88,3 +88,9 @@ class tquiet:
 
     def update(self, n=1):
         pass
+
+    def close(self):
+        pass
+
+    def set_description(self, desc=None, refresh=True):
+        pass
