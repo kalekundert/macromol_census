@@ -10,8 +10,8 @@ from contextlib import contextmanager
 #
 # [1]: https://gemmi.readthedocs.io/en/latest/mol.html#pdbx-mmcif-format
 
-def open_db(path):
-    return duckdb.connect(path)
+def open_db(path, read_only=False):
+    return duckdb.connect(path, read_only=read_only)
 
 def init_db(db):
 
