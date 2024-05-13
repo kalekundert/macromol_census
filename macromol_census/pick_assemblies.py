@@ -21,10 +21,11 @@ from more_itertools import one, flatten
 from functools import reduce, cached_property
 from tqdm import tqdm
 
-from typing import TypeAlias, Callable
+from typing import TypeAlias, TypeVar, Callable
 from collections.abc import Iterable
 
 Subchain: TypeAlias = tuple[str, int]
+K, C = TypeVar('K'), TypeVar('C')
 
 class Visitor:
     """
@@ -573,7 +574,7 @@ def _accept_nonredundant_subchain_pairs(
             accepted_cluster_pairs,
     )
 
-def _accept_nonredundant_candidates[K, C](
+def _accept_nonredundant_candidates(
         candidates: list[Candidate],
         iter_keys: Callable[[Candidate], Iterable[K]],
         cluster_from_key: Callable[[K], C],
