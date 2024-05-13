@@ -2,6 +2,13 @@
 
 
 
+## v0.2.0 (2024-05-13)
+
+### Feature
+
+* feat: restore support for python~=3.10 ([`0bdbb3e`](https://github.com/kalekundert/macromol_census/commit/0bdbb3eef9c30be1c10257f6e6cab1770486cb45))
+
+
 ## v0.1.0 (2024-05-01)
 
 ### Chore
