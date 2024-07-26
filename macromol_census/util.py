@@ -23,17 +23,16 @@ def extract_dataframe(
     # (null) and `.` (false).  This is a particularly unhelpful distinction 
     # when the column in question is supposed to contain float data, because 
     # the latter then becomes 0 rather than null.
-    #
-    # To avoid these problems, we explicitly specify a schema where each column 
-    # is a string.  Doing this happens to convert any booleans present in the 
-    # data to null, thereby solving both of the above problems at once.
 
     pdb_id = cif.name.lower()
 
     try:
         df = MANUAL_CORRECTIONS[pdb_id, key_prefix]
     except KeyError:
-        loop = cif.get_mmcif_category(f'_{key_prefix}.')
+        loop = {
+                k: [v if isinstance(v, str) else None for v in vs]
+                for k, vs in cif.get_mmcif_category(f'_{key_prefix}.').items()
+        }
         df = pl.DataFrame(loop, {k: str for k in loop})
 
     expected_cols = list(chain(
