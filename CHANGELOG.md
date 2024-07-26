@@ -2,6 +2,13 @@
 
 
 
+## v0.2.1 (2024-07-26)
+
+### Fix
+
+* fix: upgrade to polars 1.0 ([`e9b43e7`](https://github.com/kalekundert/macromol_census/commit/e9b43e7e2ce517ff25f42f39851c3afc089cdb68))
+
+
 ## v0.2.0 (2024-05-13)
 
 ### Feature
