@@ -10,7 +10,7 @@ from datetime import date
 
 CIF_DIR = Path(__file__).parent / 'pdb'
 
-assert_frame_equal = partial(assert_frame_equal, check_dtype=False)
+assert_frame_equal = partial(assert_frame_equal, check_dtypes=False)
 
 def test_find_uningested_paths():
     db = mmc.open_db(':memory:')

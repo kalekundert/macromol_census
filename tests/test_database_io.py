@@ -6,7 +6,7 @@ from pytest import approx
 from datetime import date
 from functools import partial
 
-assert_frame_equal = partial(assert_frame_equal, check_dtype=False)
+assert_frame_equal = partial(assert_frame_equal, check_dtypes=False)
 
 def insert_1abc(db):
     # A structure with the minimal amount of information.
