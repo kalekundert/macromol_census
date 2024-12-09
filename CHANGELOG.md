@@ -2,6 +2,23 @@
 
 
 
+## v0.3.0 (2024-12-09)
+
+### Chore
+
+* chore: fix upload of coverage artifacts ([`692c61b`](https://github.com/kalekundert/macromol_census/commit/692c61b0915be8d6cd3312fe41fd251d01bb9958))
+
+* chore: update deprecated argument name ([`4e0fff7`](https://github.com/kalekundert/macromol_census/commit/4e0fff75226c7358258512d0538645dccb4c82f8))
+
+### Documentation
+
+* docs: improve brief project description ([`938a082`](https://github.com/kalekundert/macromol_census/commit/938a0823823a2ab2b0d1e3b8a20c88a257c7f453))
+
+### Feature
+
+* feat: allow comments in blacklist files ([`bf53bd2`](https://github.com/kalekundert/macromol_census/commit/bf53bd2adcc15978e06cc128078660355a679325))
+
+
 ## v0.2.1 (2024-07-26)
 
 ### Fix
